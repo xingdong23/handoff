@@ -1,0 +1,27 @@
+{
+  "name": "@handoff-dev/handoff",
+  "version": "0.1.0",
+  "description": "Open-source AI chat capsule, sharing, recovery, Git, and GitLab command center.",
+  "type": "module",
+  "bin": {
+    "handoff": "./bin/handoff.js"
+  },
+  "scripts": {
+    "start": "node ./bin/handoff.js dashboard",
+    "dev": "node ./bin/handoff.js dashboard --port 7349",
+    "test": "node --test",
+    "check": "node --check ./bin/handoff.js && node --check ./src/cli/index.js && node --check ./src/server/index.js && node --test",
+    "plugin:validate": "claude plugin validate .claude-plugin/marketplace.json --strict && claude plugin validate plugins/handoff --strict"
+  },
+  "keywords": [
+    "ai",
+    "agent",
+    "claude-code",
+    "handoff",
+    "gitlab"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.5.0"
+  }
+}

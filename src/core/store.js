@@ -1,0 +1,786 @@
+import { existsSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { homedir } from "node:os";
+import { basename, dirname, join, resolve } from "node:path";
+import { ensureDir, listDirectories, nowIso, readJson, readText, slugify } from "./utils.js";
+import { findProjectRoot } from "./git.js";
+import { deriveTitle } from "./titles.js";
+
+const originalEmitWarning = process.emitWarning;
+process.emitWarning = (warning, ...args) => {
+  const type = typeof args[0] === "string" ? args[0] : args[0]?.type;
+  if (type === "ExperimentalWarning") return;
+  return originalEmitWarning.call(process, warning, ...args);
+};
+
+let DatabaseSync;
+try {
+  ({ DatabaseSync } = await import("node:sqlite"));
+} finally {
+  process.emitWarning = originalEmitWarning;
+}
+
+const dbCache = new Map();
+
+function dbPath() {
+  return resolve(process.env.HANDOFF_DB || join(homedir(), ".handoff", "handoff.sqlite"));
+}
+
+function openDb() {
+  const path = dbPath();
+  const cached = dbCache.get(path);
+  if (cached) return cached;
+
+  ensureDir(dirname(path));
+  const db = new DatabaseSync(path);
+  db.exec("PRAGMA foreign_keys = ON;");
+  db.exec("PRAGMA journal_mode = WAL;");
+  migrate(db);
+  dbCache.set(path, db);
+  return db;
+}
+
+function migrate(db) {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS meta (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      root TEXT NOT NULL UNIQUE,
+      gitlab_base_url TEXT NOT NULL DEFAULT 'https://gitlab.com',
+      gitlab_project_id TEXT NOT NULL DEFAULT '',
+      gitlab_token TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS capsules (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT NOT NULL,
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      source_app TEXT NOT NULL,
+      source_chat_name TEXT NOT NULL DEFAULT '',
+      source_session_id TEXT NOT NULL DEFAULT '',
+      conversation_key TEXT NOT NULL DEFAULT '',
+      capsule_json TEXT NOT NULL,
+      transcript_md TEXT NOT NULL,
+      context_pack_md TEXT NOT NULL,
+      share_pack_md TEXT NOT NULL,
+      recovery_prompt_md TEXT NOT NULL,
+      files_json TEXT NOT NULL,
+      gitlab_links_json TEXT NOT NULL,
+      decisions_md TEXT NOT NULL,
+      next_actions_md TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS shares (
+      token TEXT PRIMARY KEY,
+      capsule_id TEXT NOT NULL REFERENCES capsules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      visibility TEXT NOT NULL,
+      expires_at TEXT,
+      ack INTEGER NOT NULL DEFAULT 0,
+      share_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS gitlab_states (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      state_json TEXT NOT NULL,
+      scanned_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS attention_states (
+      project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      payload_json TEXT NOT NULL,
+      scanned_at TEXT
+    );
+  `);
+  ensureColumn(db, "projects", "gitlab_token", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "capsules", "conversation_key", "TEXT NOT NULL DEFAULT ''");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_capsules_conversation_key ON capsules(project_id, conversation_key);");
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '1')").run();
+}
+
+function ensureColumn(db, table, column, definition) {
+  const columns = db.prepare(`PRAGMA table_info(${table})`).all();
+  if (columns.some((item) => item.name === column)) return;
+  db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition};`);
+}
+
+function parseJson(value, fallback) {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+function jsonText(value) {
+  return `${JSON.stringify(value ?? null, null, 2)}\n`;
+}
+
+function metaValue(key) {
+  return openDb().prepare("SELECT value FROM meta WHERE key = ?").get(key)?.value || "";
+}
+
+function setMetaValue(key, value) {
+  openDb().prepare("INSERT OR REPLACE INTO meta(key, value) VALUES(?, ?)").run(key, String(value || ""));
+}
+
+export function loadGitLabToken() {
+  const token = metaValue("gitlab_token");
+  if (token) return token;
+  return openDb().prepare("SELECT gitlab_token FROM projects WHERE gitlab_token <> '' ORDER BY updated_at DESC LIMIT 1").get()?.gitlab_token || "";
+}
+
+export function saveGitLabToken(token) {
+  setMetaValue("gitlab_token", token);
+  return { tokenConfigured: Boolean(token) };
+}
+
+export function gitLabTokenConfigured() {
+  return Boolean(loadGitLabToken());
+}
+
+function normalizedText(value) {
+  const text = String(value ?? "");
+  return text.endsWith("\n") ? text : `${text}\n`;
+}
+
+function rootHash(root) {
+  return createHash("sha1").update(root).digest("hex").slice(0, 8);
+}
+
+function uniqueProjectId(db, requested, root) {
+  const base = slugify(requested || basename(root) || "project");
+  const existing = db.prepare("SELECT root FROM projects WHERE id = ?").get(base);
+  if (!existing || existing.root === root) return base;
+  return `${base}-${rootHash(root)}`;
+}
+
+function pick(value, fallback) {
+  return value === undefined || value === null ? fallback : value;
+}
+
+function changedProjectFields(existing, next) {
+  return existing.id !== next.id ||
+    existing.name !== next.name ||
+    existing.gitlab_base_url !== next.gitlabBaseUrl ||
+    existing.gitlab_project_id !== next.gitlabProjectId ||
+    existing.gitlab_token !== next.gitlabToken;
+}
+
+function rowToProject(row) {
+  return {
+    id: row.id,
+    name: row.name,
+    root: row.root,
+    gitlab: {
+      baseUrl: row.gitlab_base_url || "https://gitlab.com",
+      projectId: row.gitlab_project_id || "",
+      tokenConfigured: gitLabTokenConfigured()
+    },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at
+  };
+}
+
+function rowToConfig(row) {
+  return {
+    projectId: row.id,
+    projectName: row.name,
+    gitlab: {
+      baseUrl: row.gitlab_base_url || "https://gitlab.com",
+      projectId: row.gitlab_project_id || "",
+      token: row.gitlab_token || ""
+    }
+  };
+}
+
+function storageRef(id) {
+  return `sqlite:${dbPath()}#capsules/${encodeURIComponent(id)}`;
+}
+
+function capsuleConversationKey(capsule) {
+  const source = capsule?.source || {};
+  const app = slugify(source.app || "manual");
+  const sessionId = String(source.sessionId || "").trim();
+  if (sessionId) return `session:${app}:${sessionId}`;
+  const chatName = String(source.chatName || "").trim();
+  if (chatName) return `chat:${app}:${chatName}`;
+  return "";
+}
+
+function deleteConversationPeers(db, projectId, capsule, conversationKey) {
+  if (!conversationKey) return;
+  const source = capsule.source || {};
+  const app = source.app || "manual";
+  const sessionId = String(source.sessionId || "").trim();
+  const chatName = String(source.chatName || "").trim();
+
+  if (sessionId) {
+    db.prepare(`
+      DELETE FROM capsules
+      WHERE project_id = ? AND id <> ? AND (
+        conversation_key = ? OR
+        (source_app = ? AND source_session_id = ?)
+      )
+    `).run(projectId, capsule.id, conversationKey, app, sessionId);
+    return;
+  }
+
+  db.prepare(`
+    DELETE FROM capsules
+    WHERE project_id = ? AND id <> ? AND (
+      conversation_key = ? OR
+      (source_app = ? AND source_chat_name = ? AND source_session_id = '')
+    )
+  `).run(projectId, capsule.id, conversationKey, app, chatName);
+}
+
+function artifactMap(files = []) {
+  const artifacts = {};
+  for (const file of files) {
+    if (file.kind === "json") artifacts[file.name] = jsonText(file.value);
+    if (file.kind === "text") artifacts[file.name] = normalizedText(file.value);
+  }
+  return artifacts;
+}
+
+function legacyConfig(root) {
+  return readJson(join(root, ".handoff", "config.json"), null);
+}
+
+function ensureProject(cwd = process.cwd(), init = {}) {
+  const root = findProjectRoot(cwd);
+  const db = openDb();
+  const existing = db.prepare("SELECT * FROM projects WHERE root = ?").get(root);
+  const legacy = existing ? null : legacyConfig(root);
+  const now = nowIso();
+
+  if (existing) {
+    const next = {
+      id: init.projectId ? uniqueProjectId(db, init.projectId, root) : existing.id,
+      name: pick(init.projectName, existing.name || basename(root)),
+      gitlabBaseUrl: pick(init.gitlabBaseUrl, existing.gitlab_base_url || "https://gitlab.com"),
+      gitlabProjectId: pick(init.gitlabProjectId, existing.gitlab_project_id || ""),
+      gitlabToken: pick(init.gitlabToken, existing.gitlab_token || "")
+    };
+    if (changedProjectFields(existing, next)) {
+      db.prepare(`
+        UPDATE projects
+        SET id = ?, name = ?, gitlab_base_url = ?, gitlab_project_id = ?, gitlab_token = ?, updated_at = ?
+        WHERE root = ?
+      `).run(
+        next.id,
+        next.name,
+        next.gitlabBaseUrl,
+        next.gitlabProjectId,
+        next.gitlabToken,
+        now,
+        root
+      );
+    }
+    const row = changedProjectFields(existing, next)
+      ? db.prepare("SELECT * FROM projects WHERE root = ?").get(root)
+      : existing;
+    importLegacyWorkspace(root, row.id);
+    return row;
+  }
+
+  const id = uniqueProjectId(db, init.projectId || legacy?.projectId || basename(root), root);
+  db.prepare(`
+    INSERT INTO projects(id, name, root, gitlab_base_url, gitlab_project_id, gitlab_token, created_at, updated_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id,
+    init.projectName || legacy?.projectName || basename(root),
+    root,
+    init.gitlabBaseUrl || legacy?.gitlab?.baseUrl || "https://gitlab.com",
+    pick(init.gitlabProjectId, legacy?.gitlab?.projectId || ""),
+    init.gitlabToken || legacy?.gitlab?.token || "",
+    now,
+    now
+  );
+  importLegacyWorkspace(root, id);
+  return db.prepare("SELECT * FROM projects WHERE root = ?").get(root);
+}
+
+function insertLegacyCapsule(db, projectId, capsule, artifacts) {
+  db.prepare(`
+    INSERT OR IGNORE INTO capsules(
+      id, project_id, title, summary, status, progress_percent,
+      source_app, source_chat_name, source_session_id, conversation_key,
+      capsule_json, transcript_md, context_pack_md, share_pack_md, recovery_prompt_md,
+      files_json, gitlab_links_json, decisions_md, next_actions_md,
+      created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    capsule.id,
+    projectId,
+    capsule.title || capsule.id,
+    capsule.summary || "",
+    capsule.progress?.status || "unknown",
+    Number(capsule.progress?.percent || 0),
+    capsule.source?.app || "manual",
+    capsule.source?.chatName || "",
+    capsule.source?.sessionId || "",
+    capsuleConversationKey(capsule),
+    artifacts["capsule.json"] || jsonText(capsule),
+    artifacts["transcript.md"] || "",
+    artifacts["context-pack.md"] || "",
+    artifacts["share-pack.md"] || "",
+    artifacts["recovery-prompt.md"] || normalizedText(capsule.contextPack?.recoveryPrompt || ""),
+    artifacts["files.json"] || jsonText({ files: capsule.contextPack?.files || [] }),
+    artifacts["gitlab-links.json"] || jsonText(capsule.gitlab || {}),
+    artifacts["decisions.md"] || "",
+    artifacts["next-actions.md"] || "",
+    capsule.createdAt || nowIso(),
+    capsule.updatedAt || capsule.createdAt || nowIso()
+  );
+}
+
+function importLegacyWorkspace(root, projectId) {
+  const legacyDir = join(root, ".handoff");
+  if (!existsSync(legacyDir)) return;
+
+  const db = openDb();
+  for (const dir of listDirectories(join(legacyDir, "capsules"))) {
+    const capsule = readJson(join(dir, "capsule.json"), null);
+    if (!capsule?.id) continue;
+    insertLegacyCapsule(db, projectId, capsule, {
+      "capsule.json": jsonText(capsule),
+      "transcript.md": readText(join(dir, "transcript.md"), ""),
+      "context-pack.md": readText(join(dir, "context-pack.md"), ""),
+      "share-pack.md": readText(join(dir, "share-pack.md"), ""),
+      "recovery-prompt.md": readText(join(dir, "recovery-prompt.md"), ""),
+      "files.json": jsonText(readJson(join(dir, "files.json"), { files: capsule.contextPack?.files || [] })),
+      "gitlab-links.json": jsonText(readJson(join(dir, "gitlab-links.json"), capsule.gitlab || {})),
+      "decisions.md": readText(join(dir, "decisions.md"), ""),
+      "next-actions.md": readText(join(dir, "next-actions.md"), "")
+    });
+  }
+
+  const gitlabState = readJson(join(legacyDir, "gitlab", "state.json"), null);
+  if (gitlabState) {
+    db.prepare(`
+      INSERT OR IGNORE INTO gitlab_states(project_id, state_json, scanned_at)
+      VALUES(?, ?, ?)
+    `).run(projectId, jsonText(gitlabState), gitlabState.scannedAt || null);
+  }
+
+  const attentionState = readJson(join(legacyDir, "reminders", "attention.json"), null);
+  if (attentionState) {
+    db.prepare(`
+      INSERT OR IGNORE INTO attention_states(project_id, payload_json, scanned_at)
+      VALUES(?, ?, ?)
+    `).run(projectId, jsonText(attentionState), attentionState.scannedAt || null);
+  }
+}
+
+function capsuleSummary(row) {
+  const capsule = hydrateCapsule(row) || {};
+  return {
+    id: row.id,
+    title: capsule.title || row.title,
+    summary: row.summary,
+    source: capsule.source || {
+      app: row.source_app,
+      chatName: row.source_chat_name,
+      sessionId: row.source_session_id
+    },
+    progress: capsule.progress || {
+      status: row.status,
+      percent: row.progress_percent,
+      currentStep: "",
+      nextStep: ""
+    },
+    git: capsule.git ? {
+      branch: capsule.git.branch || null,
+      requirement: capsule.git.requirement || null
+    } : null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    conversationKey: row.conversation_key || "",
+    storage: storageRef(row.id),
+    dir: storageRef(row.id)
+  };
+}
+
+function capsuleTitle(row, capsule) {
+  return deriveTitle({
+    optionTitle: capsule?.title || row.title,
+    context: {
+      title: capsule?.contextPack?.title || "",
+      summary: capsule?.summary || row.summary,
+      currentStep: capsule?.progress?.currentStep || "",
+      nextStep: capsule?.progress?.nextStep || ""
+    },
+    input: row.transcript_md || ""
+  });
+}
+
+function hydrateCapsule(row) {
+  const capsule = parseJson(row.capsule_json, null);
+  if (!capsule) return null;
+  const title = capsuleTitle(row, capsule);
+  return title && title !== capsule.title ? { ...capsule, title } : capsule;
+}
+
+function capsuleRefValue(ref) {
+  const value = String(ref || "");
+  const match = value.match(/#capsules\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : value;
+}
+
+function capsuleRowByRef(cwd, ref) {
+  const value = capsuleRefValue(ref);
+  if (!value) return null;
+
+  const db = openDb();
+  const project = ensureProject(cwd);
+  return db.prepare(`
+    SELECT * FROM capsules
+    WHERE project_id = ? AND (id = ? OR title = ?)
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(project.id, value, value) || db.prepare(`
+    SELECT * FROM capsules
+    WHERE id = ? OR title = ?
+    ORDER BY created_at DESC
+    LIMIT 1
+  `).get(value, value);
+}
+
+export function workspacePaths(cwd = process.cwd()) {
+  const root = findProjectRoot(cwd);
+  const handoffDir = join(root, ".handoff");
+  return {
+    root,
+    dbPath: dbPath(),
+    handoffHome: dirname(dbPath()),
+    handoffDir,
+    capsulesDir: join(handoffDir, "capsules"),
+    sharesDir: join(handoffDir, "shares"),
+    gitlabDir: join(handoffDir, "gitlab"),
+    remindersDir: join(handoffDir, "reminders"),
+    configPath: join(handoffDir, "config.json"),
+    indexPath: join(handoffDir, "index.json")
+  };
+}
+
+export function ensureWorkspace(cwd = process.cwd(), init = {}) {
+  const project = ensureProject(cwd, init);
+  return {
+    ...workspacePaths(project.root),
+    project: rowToProject(project)
+  };
+}
+
+export function loadConfig(cwd = process.cwd()) {
+  return rowToConfig(ensureProject(cwd));
+}
+
+export function saveConfig(cwd, config) {
+  ensureProject(cwd, {
+    projectId: config.projectId,
+    projectName: config.projectName,
+    gitlabBaseUrl: config.gitlab?.baseUrl,
+    gitlabProjectId: config.gitlab?.projectId,
+    gitlabToken: config.gitlab?.token
+  });
+}
+
+export function listProjects() {
+  return openDb()
+    .prepare("SELECT * FROM projects ORDER BY updated_at DESC, name ASC")
+    .all()
+    .map(rowToProject);
+}
+
+export function getProject(projectId) {
+  const row = openDb().prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  return row ? rowToProject(row) : null;
+}
+
+export function updateProjectGitLab(projectId, settings = {}) {
+  const db = openDb();
+  const row = db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId);
+  if (!row) return null;
+  const next = {
+    baseUrl: pick(settings.baseUrl, row.gitlab_base_url || "https://gitlab.com"),
+    projectId: pick(settings.gitlabProjectId, row.gitlab_project_id || ""),
+    token: settings.token === undefined ? row.gitlab_token || "" : String(settings.token || "")
+  };
+  const now = nowIso();
+  db.prepare(`
+    UPDATE projects
+    SET gitlab_base_url = ?, gitlab_project_id = ?, gitlab_token = ?, updated_at = ?
+    WHERE id = ?
+  `).run(next.baseUrl, next.projectId, next.token, now, projectId);
+  return rowToProject(db.prepare("SELECT * FROM projects WHERE id = ?").get(projectId));
+}
+
+export function listCapsules(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  return listCapsulesForProject(project.id);
+}
+
+export function listCapsulesForProject(projectId) {
+  return openDb()
+    .prepare("SELECT * FROM capsules WHERE project_id = ? ORDER BY created_at DESC")
+    .all(projectId)
+    .map(capsuleSummary);
+}
+
+export function loadIndex(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  const shares = openDb().prepare(`
+    SELECT shares.token, shares.capsule_id, shares.created_at, shares.expires_at, shares.visibility
+    FROM shares
+    JOIN capsules ON capsules.id = shares.capsule_id
+    WHERE capsules.project_id = ?
+    ORDER BY shares.created_at DESC
+  `).all(project.id);
+
+  return {
+    version: 1,
+    capsules: listCapsulesForProject(project.id),
+    shares: shares.map((share) => ({
+      token: share.token,
+      capsuleId: share.capsule_id,
+      createdAt: share.created_at,
+      expiresAt: share.expires_at,
+      visibility: share.visibility
+    })),
+    updatedAt: nowIso()
+  };
+}
+
+export function saveIndex(cwd = process.cwd()) {
+  return loadIndex(cwd);
+}
+
+export function saveCapsule(cwd, capsule, files) {
+  const project = ensureProject(cwd, {
+    projectId: capsule.project?.id,
+    projectName: capsule.project?.name
+  });
+  const artifacts = artifactMap(files);
+  const createdAt = capsule.createdAt || nowIso();
+  const updatedAt = capsule.updatedAt || createdAt;
+  const conversationKey = capsuleConversationKey(capsule);
+  const db = openDb();
+
+  deleteConversationPeers(db, project.id, capsule, conversationKey);
+
+  db.prepare(`
+    INSERT INTO capsules(
+      id, project_id, title, summary, status, progress_percent,
+      source_app, source_chat_name, source_session_id, conversation_key,
+      capsule_json, transcript_md, context_pack_md, share_pack_md, recovery_prompt_md,
+      files_json, gitlab_links_json, decisions_md, next_actions_md,
+      created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      project_id = excluded.project_id,
+      title = excluded.title,
+      summary = excluded.summary,
+      status = excluded.status,
+      progress_percent = excluded.progress_percent,
+      source_app = excluded.source_app,
+      source_chat_name = excluded.source_chat_name,
+      source_session_id = excluded.source_session_id,
+      conversation_key = excluded.conversation_key,
+      capsule_json = excluded.capsule_json,
+      transcript_md = excluded.transcript_md,
+      context_pack_md = excluded.context_pack_md,
+      share_pack_md = excluded.share_pack_md,
+      recovery_prompt_md = excluded.recovery_prompt_md,
+      files_json = excluded.files_json,
+      gitlab_links_json = excluded.gitlab_links_json,
+      decisions_md = excluded.decisions_md,
+      next_actions_md = excluded.next_actions_md,
+      updated_at = excluded.updated_at
+  `).run(
+    capsule.id,
+    project.id,
+    capsule.title,
+    capsule.summary || "",
+    capsule.progress?.status || "unknown",
+    Number(capsule.progress?.percent || 0),
+    capsule.source?.app || "manual",
+    capsule.source?.chatName || "",
+    capsule.source?.sessionId || "",
+    conversationKey,
+    artifacts["capsule.json"] || jsonText(capsule),
+    artifacts["transcript.md"] || "",
+    artifacts["context-pack.md"] || "",
+    artifacts["share-pack.md"] || "",
+    artifacts["recovery-prompt.md"] || normalizedText(capsule.contextPack?.recoveryPrompt || ""),
+    artifacts["files.json"] || jsonText({ files: capsule.contextPack?.files || [] }),
+    artifacts["gitlab-links.json"] || jsonText(capsule.gitlab || {}),
+    artifacts["decisions.md"] || "",
+    artifacts["next-actions.md"] || "",
+    createdAt,
+    updatedAt
+  );
+
+  db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, project.id);
+  return storageRef(capsule.id);
+}
+
+export function deleteCapsule(cwd = process.cwd(), ref) {
+  const row = capsuleRowByRef(cwd, ref);
+  if (!row) return { deleted: false, capsuleId: ref || "", title: "" };
+  const capsule = hydrateCapsule(row);
+  const result = openDb().prepare("DELETE FROM capsules WHERE id = ?").run(row.id);
+  return {
+    deleted: Boolean(result.changes),
+    capsuleId: row.id,
+    title: capsule?.title || row.title
+  };
+}
+
+export function readCapsule(cwd = process.cwd(), ref) {
+  const row = capsuleRowByRef(cwd, ref);
+  if (row) return hydrateCapsule(row);
+
+  const direct = resolve(ref || "");
+  const paths = workspacePaths(cwd);
+  const candidates = [
+    join(paths.capsulesDir, ref || "", "capsule.json"),
+    join(paths.capsulesDir, ref || ""),
+    direct,
+    join(direct, "capsule.json")
+  ];
+
+  for (const candidate of candidates) {
+    const capsule = readJson(candidate, null);
+    if (capsule?.id) return capsule;
+  }
+
+  return null;
+}
+
+export function readCapsuleArtifacts(cwd = process.cwd(), ref) {
+  const row = capsuleRowByRef(cwd, ref);
+  if (!row) return null;
+  return {
+    "capsule.json": normalizedText(row.capsule_json),
+    "transcript.md": normalizedText(row.transcript_md),
+    "context-pack.md": normalizedText(row.context_pack_md),
+    "share-pack.md": normalizedText(row.share_pack_md),
+    "recovery-prompt.md": normalizedText(row.recovery_prompt_md),
+    "files.json": normalizedText(row.files_json),
+    "gitlab-links.json": normalizedText(row.gitlab_links_json),
+    "decisions.md": normalizedText(row.decisions_md),
+    "next-actions.md": normalizedText(row.next_actions_md)
+  };
+}
+
+export function saveShare(cwd, share) {
+  ensureProject(cwd);
+  const db = openDb();
+  db.prepare(`
+    INSERT INTO shares(token, capsule_id, visibility, expires_at, ack, share_json, created_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET
+      capsule_id = excluded.capsule_id,
+      visibility = excluded.visibility,
+      expires_at = excluded.expires_at,
+      ack = excluded.ack,
+      share_json = excluded.share_json
+  `).run(
+    share.token,
+    share.capsuleId,
+    share.visibility || "private",
+    share.expiresAt || null,
+    share.ack ? 1 : 0,
+    jsonText(share),
+    share.createdAt || nowIso()
+  );
+}
+
+export function readShare(cwd = process.cwd(), token) {
+  ensureProject(cwd);
+  const row = openDb().prepare("SELECT share_json FROM shares WHERE token = ?").get(token);
+  return row ? parseJson(row.share_json, null) : null;
+}
+
+export function saveGitLabState(cwd, state) {
+  const project = ensureProject(cwd);
+  const scannedAt = state?.scannedAt || nowIso();
+  openDb().prepare(`
+    INSERT INTO gitlab_states(project_id, state_json, scanned_at)
+    VALUES(?, ?, ?)
+    ON CONFLICT(project_id) DO UPDATE SET
+      state_json = excluded.state_json,
+      scanned_at = excluded.scanned_at
+  `).run(project.id, jsonText(state), scannedAt);
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(scannedAt, project.id);
+  return state;
+}
+
+export function loadGitLabState(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  return loadGitLabStateForProject(project.id);
+}
+
+export function loadGitLabStateForProject(projectId) {
+  const row = openDb().prepare("SELECT state_json FROM gitlab_states WHERE project_id = ?").get(projectId);
+  return row ? parseJson(row.state_json, emptyGitLabState()) : emptyGitLabState();
+}
+
+export function saveAttentionState(cwd, payload) {
+  const project = ensureProject(cwd);
+  const scannedAt = payload?.scannedAt || nowIso();
+  openDb().prepare(`
+    INSERT INTO attention_states(project_id, payload_json, scanned_at)
+    VALUES(?, ?, ?)
+    ON CONFLICT(project_id) DO UPDATE SET
+      payload_json = excluded.payload_json,
+      scanned_at = excluded.scanned_at
+  `).run(project.id, jsonText(payload), scannedAt);
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(scannedAt, project.id);
+  return payload;
+}
+
+export function loadAttentionState(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  const row = openDb().prepare("SELECT payload_json FROM attention_states WHERE project_id = ?").get(project.id);
+  return row ? parseJson(row.payload_json, emptyAttentionState()) : emptyAttentionState();
+}
+
+export function findHandoffWorkspaces(baseDir) {
+  const projects = listProjects();
+  return projects.length ? projects.map((project) => project.root) : [resolve(baseDir)];
+}
+
+function emptyGitLabState() {
+  return {
+    scannedAt: null,
+    mergeRequests: [],
+    pipelines: [],
+    issues: []
+  };
+}
+
+function emptyAttentionState() {
+  return {
+    scannedAt: null,
+    items: []
+  };
+}

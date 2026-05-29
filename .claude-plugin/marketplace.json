@@ -1,0 +1,20 @@
+{
+  "name": "handoff-marketplace",
+  "owner": {
+    "name": "Handoff Contributors"
+  },
+  "description": "Claude Code plugins for AI chat capsule capture, sharing, recovery, Git, GitLab, and project dashboards.",
+  "plugins": [
+    {
+      "name": "handoff",
+      "source": "./plugins/handoff",
+      "description": "Capture, share, recover, and track AI chat capsules across projects with a shared local SQLite dashboard.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Handoff Contributors"
+      },
+      "category": "developer-tools",
+      "tags": ["ai", "handoff", "claude-code", "gitlab", "dashboard"]
+    }
+  ]
+}

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Handoff Work OS</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%232563eb'/%3E%3Cpath d='M18 18h10v11h8V18h10v28H36V35h-8v11H18z' fill='white'/%3E%3C/svg%3E">
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="main">
+        <header class="page-header">
+          <div class="header-left">
+            <div class="brand-lockup">
+              <div class="brand-mark">H</div>
+              <div>
+                <h1>Handoff</h1>
+                <p>AI 会话资产大盘</p>
+              </div>
+            </div>
+            <div>
+              <span class="section-kicker">Work OS</span>
+              <h2>AI 时代的工作大盘</h2>
+              <p>会话资产、上下文接续、代码交付与个人 PR 全景</p>
+            </div>
+          </div>
+          <div class="header-actions">
+            <label class="search-box">
+              <span aria-hidden="true"></span>
+              <input id="search" type="search" placeholder="搜索项目、Capsule、MR">
+            </label>
+            <select id="project-filter" aria-label="项目筛选">
+              <option value="all">全部项目</option>
+            </select>
+            <button id="refresh" class="icon-button" type="button" title="刷新">
+              <span aria-hidden="true"></span>
+              刷新
+            </button>
+            <button id="settings" class="icon-button plain" type="button" title="设置">
+              设置
+            </button>
+          </div>
+        </header>
+
+        <section id="overview" class="metrics-grid" aria-label="关键指标"></section>
+
+        <section id="content-grid" class="content-grid side-collapsed">
+          <aside id="side-column" class="side-column" aria-label="交付与关注">
+            <button id="side-toggle" class="side-toggle" type="button" aria-expanded="false">展开</button>
+            <div class="side-rail">
+              <button class="rail-item" type="button" data-panel="delivery">
+                <span>PR</span>
+                <strong id="rail-gitlab-count">0</strong>
+              </button>
+              <button class="rail-item" type="button" data-panel="attention">
+                <span>AI</span>
+                <strong id="rail-attention-count">0</strong>
+              </button>
+            </div>
+            <div class="side-panels">
+              <section id="gitlab" class="panel gitlab-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="section-kicker">Delivery</span>
+                    <h3>GitLab 交付状态</h3>
+                  </div>
+                  <div class="panel-tools">
+                    <span id="gitlab-count" class="counter"></span>
+                    <button id="scan-gitlab" class="mini-button" type="button">扫描</button>
+                  </div>
+                </div>
+                <div id="mr-list" class="mr-list"></div>
+              </section>
+
+              <section id="attention" class="panel attention-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="section-kicker">Attention</span>
+                    <h3>AI 关注队列</h3>
+                  </div>
+                  <span id="attention-count" class="counter"></span>
+                </div>
+                <div id="attention-list" class="attention-list"></div>
+              </section>
+            </div>
+          </aside>
+
+          <div class="primary-column">
+            <section id="capsules" class="panel capsule-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="section-kicker">Capsules</span>
+                  <h3>会话资产 Capsule</h3>
+                </div>
+                <span id="capsule-count" class="counter"></span>
+              </div>
+              <div id="capsule-list" class="capsule-list"></div>
+            </section>
+          </div>
+        </section>
+      </main>
+
+      <dialog id="context-dialog" class="context-dialog">
+        <div class="dialog-card">
+          <header class="dialog-header">
+            <div>
+              <span id="dialog-kicker" class="section-kicker">Recovery</span>
+              <h3 id="dialog-title">可恢复上下文</h3>
+            </div>
+            <div class="dialog-actions">
+              <button id="copy-context" type="button">复制</button>
+              <button id="close-context" type="button">关闭</button>
+            </div>
+          </header>
+          <pre id="context-preview">选择一个 Capsule 后展示上下文。</pre>
+          <div id="file-chips" class="file-chips"></div>
+        </div>
+      </dialog>
+
+      <dialog id="settings-dialog" class="context-dialog settings-dialog">
+        <form id="settings-form" class="dialog-card">
+          <header class="dialog-header">
+            <div>
+              <span class="section-kicker">Settings</span>
+              <h3>GitLab 设置</h3>
+            </div>
+            <div class="dialog-actions">
+              <button id="save-settings" type="submit">保存</button>
+              <button id="scan-settings" type="button">保存并扫描</button>
+              <button id="close-settings" type="button">关闭</button>
+            </div>
+          </header>
+          <div class="settings-body">
+            <label>
+              <span>项目</span>
+              <select id="settings-project"></select>
+            </label>
+            <div class="detected-card">
+              <span>本地 GitLab 项目</span>
+              <strong id="settings-detected-title">未识别</strong>
+            </div>
+            <p id="settings-detected" class="settings-hint"></p>
+            <label>
+              <span>全局 Token</span>
+              <input id="settings-token" type="password" autocomplete="off" placeholder="留空则保留已保存 token">
+            </label>
+            <p id="settings-token-state" class="settings-hint"></p>
+            <p id="settings-message" class="settings-message"></p>
+          </div>
+        </form>
+      </dialog>
+    </div>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

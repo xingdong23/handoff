@@ -1,0 +1,10 @@
+{
+  "name": "handoff",
+  "version": "0.1.0",
+  "description": "Capture, share, recover, and track AI chat capsules across projects with a shared local SQLite dashboard.",
+  "commands": "./commands",
+  "author": {
+    "name": "Handoff Contributors"
+  },
+  "homepage": "https://github.com/handoff-dev/handoff"
+}
