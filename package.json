@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Open-source AI chat capsule, sharing, recovery, Git, and GitLab command center.",
   "type": "module",
+  "homepage": "https://github.com/xingdong23/handoff",
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/xingdong23/handoff.git"
+  },
+  "bugs": {
+    "url": "https://github.com/xingdong23/handoff/issues"
+  },
   "bin": {
     "handoff": "./bin/handoff.js"
   },
