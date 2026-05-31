@@ -9,6 +9,7 @@ import { deleteCapsule, gitLabTokenConfigured, listProjects, loadGitLabToken, re
 import { createShare } from "../src/core/share.js";
 import { computeAttention } from "../src/core/reminders.js";
 import { getDashboard } from "../src/core/dashboard.js";
+import { buildTeamMemory, createKnowledgeCapsule, listTeamMemorySnapshots, readKnowledgeCapsule } from "../src/core/knowledge.js";
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -268,4 +269,35 @@ test("computes attention items", () => {
     git: { dirtyFiles: ["a.js"], root: "/tmp/project" }
   });
   assert.equal(items.length, 4);
+});
+
+test("extracts a knowledge capsule and builds team memory", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+  const { capsule } = createCapsule({
+    cwd,
+    title: "payment timeout knowledge",
+    input: JSON.stringify({
+      summary: "Payment timeout was fixed by adding retry limits and a smaller connection pool timeout.",
+      facts: ["RetryScheduler owns retry dispatch"],
+      decisions: ["Use exponential backoff"],
+      files: ["src/RetryScheduler.java"],
+      commands: ["npm test"],
+      nextActions: ["Watch production timeout rate"]
+    }),
+    source: "test"
+  });
+
+  const knowledge = createKnowledgeCapsule(cwd, capsule.id);
+
+  assert.equal(knowledge.capsuleId, capsule.id);
+  assert.equal(knowledge.decisions[0], "Use exponential backoff");
+  assert.match(knowledge.storage, /^sqlite:/);
+  assert.equal(readKnowledgeCapsule(cwd, knowledge.id).facts[0], "RetryScheduler owns retry dispatch");
+
+  const memory = buildTeamMemory(cwd, { scope: "team" });
+
+  assert.equal(memory.sourceCount, 1);
+  assert.match(memory.markdown, /Use exponential backoff/);
+  assert.equal(listTeamMemorySnapshots({ limit: 1 })[0].id, memory.id);
 });

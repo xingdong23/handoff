@@ -481,6 +481,7 @@ function rowToKnowledge(row) {
   return {
     ...knowledge,
     id: row.id,
+    projectId: row.project_id,
     capsuleId: row.capsule_id,
     title: row.title,
     summary: row.summary,
@@ -508,6 +509,18 @@ function rowToTeamMemory(row) {
     updatedAt: row.updated_at,
     storage: memoryStorageRef(row.id)
   };
+}
+
+function knowledgeRefValue(ref) {
+  const value = String(ref || "");
+  const match = value.match(/#knowledge\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : value;
+}
+
+function memoryRefValue(ref) {
+  const value = String(ref || "");
+  const match = value.match(/#team-memory\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : value;
 }
 
 function capsuleRefValue(ref) {
@@ -761,6 +774,150 @@ export function readCapsuleArtifacts(cwd = process.cwd(), ref) {
     "decisions.md": normalizedText(row.decisions_md),
     "next-actions.md": normalizedText(row.next_actions_md)
   };
+}
+
+export function saveKnowledgeCapsule(cwd, knowledge) {
+  const project = ensureProject(cwd);
+  const projectId = knowledge.projectId || knowledge.project?.id || project.id;
+  const now = nowIso();
+  const existing = openDb().prepare(`
+    SELECT id, created_at FROM knowledge_capsules
+    WHERE project_id = ? AND capsule_id = ?
+  `).get(projectId, knowledge.capsuleId);
+  const id = existing?.id || knowledge.id;
+  const createdAt = existing?.created_at || knowledge.createdAt || now;
+  const updatedAt = knowledge.updatedAt || now;
+  const payload = {
+    ...knowledge,
+    id,
+    projectId,
+    createdAt,
+    updatedAt
+  };
+
+  openDb().prepare(`
+    INSERT INTO knowledge_capsules(
+      id, project_id, capsule_id, title, summary, topics_json,
+      facts_json, decisions_json, files_json, commands_json,
+      knowledge_json, created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(project_id, capsule_id) DO UPDATE SET
+      title = excluded.title,
+      summary = excluded.summary,
+      topics_json = excluded.topics_json,
+      facts_json = excluded.facts_json,
+      decisions_json = excluded.decisions_json,
+      files_json = excluded.files_json,
+      commands_json = excluded.commands_json,
+      knowledge_json = excluded.knowledge_json,
+      updated_at = excluded.updated_at
+  `).run(
+    id,
+    projectId,
+    payload.capsuleId,
+    payload.title,
+    payload.summary || "",
+    jsonText(payload.topics || []),
+    jsonText(payload.facts || []),
+    jsonText(payload.decisions || []),
+    jsonText(payload.files || []),
+    jsonText(payload.commands || []),
+    jsonText(payload),
+    createdAt,
+    updatedAt
+  );
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, projectId);
+  return knowledgeStorageRef(id);
+}
+
+export function readKnowledgeCapsule(cwd = process.cwd(), ref) {
+  const value = knowledgeRefValue(ref);
+  if (!value) return null;
+  const project = ensureProject(cwd);
+  const row = openDb().prepare(`
+    SELECT * FROM knowledge_capsules
+    WHERE project_id = ? AND (id = ? OR capsule_id = ? OR title = ?)
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(project.id, value, value, value) || openDb().prepare(`
+    SELECT * FROM knowledge_capsules
+    WHERE id = ? OR capsule_id = ? OR title = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(value, value, value);
+  return row ? rowToKnowledge(row) : null;
+}
+
+export function listKnowledgeCapsules(cwd = process.cwd(), options = {}) {
+  const db = openDb();
+  const limit = Math.max(1, Math.min(Number(options.limit || 200), 1000));
+  if (options.scope === "team" || options.allProjects) {
+    return db.prepare("SELECT * FROM knowledge_capsules ORDER BY updated_at DESC LIMIT ?")
+      .all(limit)
+      .map(rowToKnowledge);
+  }
+  const project = ensureProject(cwd);
+  return db.prepare(`
+    SELECT * FROM knowledge_capsules
+    WHERE project_id = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(project.id, limit).map(rowToKnowledge);
+}
+
+export function saveTeamMemorySnapshot(memory) {
+  const now = nowIso();
+  const createdAt = memory.createdAt || now;
+  const updatedAt = memory.updatedAt || now;
+  const payload = {
+    ...memory,
+    createdAt,
+    updatedAt
+  };
+  openDb().prepare(`
+    INSERT INTO team_memory_snapshots(
+      id, title, scope, memory_json, memory_md, source_count, created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      title = excluded.title,
+      scope = excluded.scope,
+      memory_json = excluded.memory_json,
+      memory_md = excluded.memory_md,
+      source_count = excluded.source_count,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.id,
+    payload.title,
+    payload.scope,
+    jsonText(payload),
+    payload.markdown || "",
+    Number(payload.sourceCount || 0),
+    createdAt,
+    updatedAt
+  );
+  return memoryStorageRef(payload.id);
+}
+
+export function readTeamMemorySnapshot(ref) {
+  const value = memoryRefValue(ref);
+  if (!value) return null;
+  const row = openDb().prepare(`
+    SELECT * FROM team_memory_snapshots
+    WHERE id = ? OR title = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(value, value);
+  return row ? rowToTeamMemory(row) : null;
+}
+
+export function listTeamMemorySnapshots(options = {}) {
+  const limit = Math.max(1, Math.min(Number(options.limit || 20), 200));
+  return openDb()
+    .prepare("SELECT * FROM team_memory_snapshots ORDER BY created_at DESC LIMIT ?")
+    .all(limit)
+    .map(rowToTeamMemory);
 }
 
 export function saveShare(cwd, share) {

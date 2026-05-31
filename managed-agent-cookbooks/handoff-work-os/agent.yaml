@@ -22,3 +22,4 @@ skills:
 callable_agents:
   - manifest: ./subagents/capsule-curator.yaml
   - manifest: ./subagents/delivery-tracker.yaml
+  - manifest: ./subagents/knowledge-distiller.yaml

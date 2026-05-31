@@ -60,6 +60,26 @@ Use share when another person or another local chat needs a portable Capsule ref
 handoff share "<capsule-id>"
 ```
 
+## Knowledge Capsule
+
+Use knowledge extraction when a high-value conversation should become reusable team knowledge.
+
+```bash
+handoff knowledge extract "<capsule-id>"
+```
+
+The returned Knowledge Capsule keeps the reusable summary, topics, facts, decisions, files, commands, next actions, and source Capsule reference.
+
+## Team Memory
+
+Use team memory when existing Knowledge Capsules should be merged into a team-level memory snapshot.
+
+```bash
+handoff memory build --scope team
+```
+
+Use `--scope project` when only the current project should be included.
+
 ## Dashboard
 
 Use the dashboard to inspect projects, Capsule progress, Git state, GitLab merge requests, and attention items.

@@ -1,0 +1,54 @@
+name: handoff-knowledge-distiller
+model: claude-opus-4-7
+system:
+  text: |
+    You extract reusable team knowledge from a Handoff Capsule. Return only stable knowledge fields: title, summary, topics, facts, decisions, files, commands, nextActions, openQuestions, and sourceCapsuleId. Keep information factual and preserve references to the source Capsule.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+mcp_servers: []
+skills:
+  - { from_plugin: ../../../plugins/vertical-plugins/handoff-core }
+callable_agents: []
+output_schema:
+  type: object
+  required: [title, summary, topics, sourceCapsuleId]
+  additionalProperties: true
+  properties:
+    title: { type: string, maxLength: 120 }
+    summary: { type: string, maxLength: 1200 }
+    sourceCapsuleId: { type: string, maxLength: 120 }
+    topics:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 120 }
+    facts:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    decisions:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    files:
+      type: array
+      maxItems: 120
+      items: { type: string, maxLength: 300 }
+    commands:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    nextActions:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }
+    openQuestions:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }

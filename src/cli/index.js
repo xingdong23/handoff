@@ -11,6 +11,15 @@ import { scanGitLab } from "../core/gitlab.js";
 import { syncCapsuleToGit } from "../core/git-sync.js";
 import { computeAttention, saveAttention } from "../core/reminders.js";
 import { getGitSnapshot } from "../core/git.js";
+import {
+  buildTeamMemory,
+  createKnowledgeCapsule,
+  formatKnowledgeMarkdown,
+  listKnowledgeCapsules,
+  listTeamMemorySnapshots,
+  readKnowledgeCapsule,
+  readTeamMemorySnapshot
+} from "../core/knowledge.js";
 import { startServer } from "../server/index.js";
 
 const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), "../../package.json");
@@ -29,6 +38,10 @@ function usage() {
     "  handoff delete <capsule-id>",
     "  handoff import <capsule-id-or-share-url>",
     "  handoff attach <capsule-id>",
+    "  handoff knowledge extract <capsule-id> --json",
+    "  handoff knowledge list --scope team --json",
+    "  handoff memory build --scope team --json",
+    "  handoff memory latest --json",
     "  handoff status --json",
     "  handoff open --port 7349 --workspace <dir>",
     "  handoff dashboard --port 7349 --workspace <dir>",
@@ -239,6 +252,88 @@ async function commandAttach(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+async function commandKnowledge(args) {
+  const sub = args._[1];
+  if (sub === "extract") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Capsule id is required");
+    const knowledge = createKnowledgeCapsule(process.cwd(), ref, {
+      title: args.title,
+      summary: args.summary,
+      topics: args.topics
+    });
+    if (args.json) return printJson(knowledge);
+    process.stdout.write(`${knowledge.id}\n${knowledge.storage}\n`);
+    return;
+  }
+
+  if (sub === "show") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Knowledge capsule id is required");
+    const knowledge = readKnowledgeCapsule(process.cwd(), ref);
+    if (!knowledge) throw new Error(`Knowledge capsule not found: ${ref}`);
+    if (args.json) return printJson(knowledge);
+    process.stdout.write(`${knowledge.markdown || formatKnowledgeMarkdown(knowledge)}\n`);
+    return;
+  }
+
+  if (sub === "list" || !sub) {
+    const items = listKnowledgeCapsules(process.cwd(), {
+      scope: args.scope || "project",
+      limit: args.limit
+    });
+    if (args.json) return printJson(items);
+    for (const item of items) {
+      process.stdout.write(`${item.id}  ${item.title}\n`);
+    }
+    return;
+  }
+
+  throw new Error("Supported knowledge commands: handoff knowledge extract <capsule-id>, handoff knowledge list, handoff knowledge show <knowledge-id>");
+}
+
+async function commandMemory(args) {
+  const sub = args._[1];
+  if (sub === "build") {
+    const memory = buildTeamMemory(process.cwd(), {
+      scope: args.scope || "team",
+      limit: args.limit
+    });
+    if (args.json) return printJson(memory);
+    process.stdout.write(`${memory.id}\n${memory.storage}\n`);
+    return;
+  }
+
+  if (sub === "show") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Team memory id is required");
+    const memory = readTeamMemorySnapshot(ref);
+    if (!memory) throw new Error(`Team memory not found: ${ref}`);
+    if (args.json) return printJson(memory);
+    process.stdout.write(`${memory.markdown || ""}\n`);
+    return;
+  }
+
+  if (sub === "latest") {
+    const memory = listTeamMemorySnapshots({ limit: 1 })[0] || null;
+    if (!memory) throw new Error("Team memory not found");
+    if (args.json) return printJson(memory);
+    process.stdout.write(`${memory.markdown || ""}\n`);
+    return;
+  }
+
+  if (sub === "list" || !sub) {
+    const items = listTeamMemorySnapshots({ limit: args.limit || 20 });
+    if (args.json) return printJson(items);
+    for (const item of items) {
+      process.stdout.write(`${item.id}  ${item.scope}  sources=${item.sourceCount}  ${item.title}\n`);
+    }
+    return;
+  }
+
+  throw new Error("Supported memory commands: handoff memory build, handoff memory list, handoff memory latest, handoff memory show <memory-id>");
+}
+
 async function commandStatus(args) {
   const dashboard = getDashboard(args.workspace || process.cwd());
   if (args.json) return printJson(dashboard);
@@ -330,6 +425,8 @@ export async function runCli(argv) {
   if (command === "delete" || command === "rm") return commandDelete(args);
   if (command === "import") return commandImport(args);
   if (command === "attach") return commandAttach(args);
+  if (command === "knowledge") return commandKnowledge(args);
+  if (command === "memory") return commandMemory(args);
   if (command === "status") return commandStatus(args);
   if (command === "open") return commandOpen(args);
   if (command === "dashboard") return commandDashboard(args);
