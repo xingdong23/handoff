@@ -1,0 +1,9 @@
+{
+  "name": "handoff-core",
+  "version": "0.1.0",
+  "description": "Core Handoff skills for AI chat capsules, recovery prompts, Git state, GitLab delivery tracking, and dashboard operation.",
+  "author": {
+    "name": "Handoff Contributors"
+  },
+  "homepage": "https://github.com/xingdong23/handoff"
+}

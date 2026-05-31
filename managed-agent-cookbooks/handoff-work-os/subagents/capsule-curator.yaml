@@ -1,0 +1,53 @@
+name: handoff-capsule-curator
+model: claude-opus-4-7
+system:
+  text: |
+    You extract a clean Handoff Capsule from a conversation transcript. Return only structured Capsule fields: title, summary, status, progressPercent, currentStep, nextStep, facts, decisions, files, commands, openQuestions, and nextActions.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+mcp_servers: []
+skills:
+  - { from_plugin: ../../../plugins/vertical-plugins/handoff-core }
+callable_agents: []
+output_schema:
+  type: object
+  required: [title, summary, status, progressPercent, currentStep, nextStep]
+  additionalProperties: true
+  properties:
+    title: { type: string, maxLength: 80 }
+    summary: { type: string, maxLength: 1200 }
+    status: { enum: [todo, in_progress, blocked, done] }
+    progressPercent: { type: number, minimum: 0, maximum: 100 }
+    currentStep: { type: string, maxLength: 400 }
+    nextStep: { type: string, maxLength: 400 }
+    facts:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 300 }
+    decisions:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 300 }
+    files:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }
+    commands:
+      type: array
+      maxItems: 30
+      items: { type: string, maxLength: 300 }
+    openQuestions:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 300 }
+    nextActions:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 300 }

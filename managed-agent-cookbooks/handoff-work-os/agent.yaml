@@ -1,0 +1,24 @@
+name: handoff-work-os
+model: claude-opus-4-7
+system:
+  file: ../../plugins/agent-plugins/handoff/agents/handoff-work-os.md
+append: |
+  You are running as a headless Handoff orchestrator. Produce Capsule, Git, GitLab, and attention state updates through the configured Handoff CLI and local workspace.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+      - name: glob
+        enabled: true
+      - name: bash
+        enabled: true
+skills:
+  - { from_plugin: ../../plugins/agent-plugins/handoff }
+callable_agents:
+  - manifest: ./subagents/capsule-curator.yaml
+  - manifest: ./subagents/delivery-tracker.yaml

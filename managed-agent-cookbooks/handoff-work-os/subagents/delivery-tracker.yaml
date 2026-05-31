@@ -1,0 +1,42 @@
+name: handoff-delivery-tracker
+model: claude-opus-4-7
+system:
+  text: |
+    You inspect scoped Git and GitLab delivery state for a Handoff Capsule. Report only the files and merge requests related to the current demand.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+      - name: glob
+        enabled: true
+      - name: bash
+        enabled: true
+mcp_servers: []
+skills:
+  - { from_plugin: ../../../plugins/vertical-plugins/handoff-core }
+callable_agents: []
+output_schema:
+  type: object
+  required: [branch, committed, pushed, summary]
+  additionalProperties: true
+  properties:
+    branch: { type: string, maxLength: 120 }
+    committed: { enum: [yes, no, unknown] }
+    pushed: { enum: [yes, no, unknown] }
+    summary: { type: string, maxLength: 800 }
+    mergeRequests:
+      type: array
+      maxItems: 20
+      items:
+        type: object
+        required: [title, state]
+        additionalProperties: true
+        properties:
+          title: { type: string, maxLength: 200 }
+          state: { type: string, maxLength: 80 }
+          webUrl: { type: string, maxLength: 500 }

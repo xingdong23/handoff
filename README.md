@@ -2,6 +2,8 @@
 
 AI 时代的工作大盘。Handoff 把 Claude Code、其他 AI Chat、Git、GitLab MR 和提醒任务放进同一套本地产品中管理，让一次高价值对话能够被保存、分享、恢复、引用，并和代码交付状态一起展示。
 
+![Handoff dashboard](./assets/dashboard.png)
+
 ## 产品定位
 
 Handoff 面向频繁使用 AI 编程助手的工程团队。核心对象是 `Capsule`，也就是一次对话形成的可恢复资产。一个 Capsule 保存标题、摘要、进度、下一步、已确认事实、关键决策、相关文件、Git 状态和恢复提示。
@@ -92,6 +94,13 @@ node ./bin/handoff.js --help
 claude plugin marketplace add "$(pwd)" --scope user
 claude plugin install handoff@handoff-marketplace
 claude plugin enable handoff
+```
+
+核心 Skill 包也可以单独安装：
+
+```bash
+claude plugin install handoff-core@handoff-marketplace
+claude plugin enable handoff-core
 ```
 
 从 GitHub 安装：
@@ -332,7 +341,11 @@ flowchart LR
 | `commands/handoff/` | Slash Command 模板 |
 | `.claude/commands/handoff/` | 本地 Claude Code 命令 |
 | `.claude-plugin/` | Claude Code 插件市场清单 |
-| `plugins/handoff/` | 插件包入口，使用符号链接指向源码 |
+| `plugins/agent-plugins/handoff/` | 完整 Handoff Work OS Agent 插件，包含 Agent Prompt、Skill、Commands、CLI 和大盘入口 |
+| `plugins/vertical-plugins/handoff-core/` | Handoff 核心能力包，放置可复用 Skill |
+| `plugins/handoff/` | 兼容旧入口，指向 `plugins/agent-plugins/handoff/` |
+| `managed-agent-cookbooks/handoff-work-os/` | 托管 Agent 模板，包含 orchestrator 与子 Agent 配置 |
+| `scripts/` | 仓库检查脚本 |
 | `src/cli/` | CLI 参数和命令处理 |
 | `src/core/` | Capsule、SQLite、Git、GitLab、提醒等核心逻辑 |
 | `src/server/` | Dashboard API 和静态资源服务 |
@@ -366,6 +379,12 @@ node --test
 
 ```bash
 npm run plugin:validate
+```
+
+### 执行完整仓库检查
+
+```bash
+scripts/check.sh
 ```
 
 ## 开源说明
