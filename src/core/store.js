@@ -85,6 +85,8 @@ function migrate(db) {
     CREATE TABLE IF NOT EXISTS shares (
       token TEXT PRIMARY KEY,
       capsule_id TEXT NOT NULL REFERENCES capsules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      artifact_type TEXT NOT NULL DEFAULT 'capsule',
+      artifact_id TEXT NOT NULL DEFAULT '',
       visibility TEXT NOT NULL,
       expires_at TEXT,
       ack INTEGER NOT NULL DEFAULT 0,
@@ -102,6 +104,18 @@ function migrate(db) {
       project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
       payload_json TEXT NOT NULL,
       scanned_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS requirement_capsules (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT NOT NULL,
+      requirement_json TEXT NOT NULL,
+      requirement_md TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE TABLE IF NOT EXISTS knowledge_capsules (
@@ -134,10 +148,13 @@ function migrate(db) {
   `);
   ensureColumn(db, "projects", "gitlab_token", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "capsules", "conversation_key", "TEXT NOT NULL DEFAULT ''");
+  ensureColumn(db, "shares", "artifact_type", "TEXT NOT NULL DEFAULT 'capsule'");
+  ensureColumn(db, "shares", "artifact_id", "TEXT NOT NULL DEFAULT ''");
   db.exec("CREATE INDEX IF NOT EXISTS idx_capsules_conversation_key ON capsules(project_id, conversation_key);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_requirement_capsules_project ON requirement_capsules(project_id, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_knowledge_capsules_capsule ON knowledge_capsules(project_id, capsule_id);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_team_memory_created ON team_memory_snapshots(created_at DESC);");
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '2')").run();
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '4')").run();
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -239,6 +256,10 @@ function rowToConfig(row) {
 
 function storageRef(id) {
   return `sqlite:${dbPath()}#capsules/${encodeURIComponent(id)}`;
+}
+
+function requirementStorageRef(id) {
+  return `sqlite:${dbPath()}#requirements/${encodeURIComponent(id)}`;
 }
 
 function knowledgeStorageRef(id) {
@@ -473,7 +494,28 @@ function hydrateCapsule(row) {
   const capsule = parseJson(row.capsule_json, null);
   if (!capsule) return null;
   const title = capsuleTitle(row, capsule);
-  return title && title !== capsule.title ? { ...capsule, title } : capsule;
+  const hydrated = title && title !== capsule.title ? { ...capsule, title } : capsule;
+  return {
+    ...hydrated,
+    storage: storageRef(row.id),
+    dir: storageRef(row.id)
+  };
+}
+
+function rowToRequirement(row) {
+  const requirement = parseJson(row.requirement_json, null) || {};
+  return {
+    ...requirement,
+    id: row.id,
+    projectId: row.project_id,
+    title: row.title,
+    summary: row.summary,
+    status: row.status,
+    markdown: row.requirement_md,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    storage: requirementStorageRef(row.id)
+  };
 }
 
 function rowToKnowledge(row) {
@@ -520,6 +562,12 @@ function knowledgeRefValue(ref) {
 function memoryRefValue(ref) {
   const value = String(ref || "");
   const match = value.match(/#team-memory\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : value;
+}
+
+function requirementRefValue(ref) {
+  const value = String(ref || "");
+  const match = value.match(/#requirements\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : value;
 }
 
@@ -632,7 +680,7 @@ export function listCapsulesForProject(projectId) {
 export function loadIndex(cwd = process.cwd()) {
   const project = ensureProject(cwd);
   const shares = openDb().prepare(`
-    SELECT shares.token, shares.capsule_id, shares.created_at, shares.expires_at, shares.visibility
+    SELECT shares.token, shares.capsule_id, shares.artifact_type, shares.artifact_id, shares.created_at, shares.expires_at, shares.visibility
     FROM shares
     JOIN capsules ON capsules.id = shares.capsule_id
     WHERE capsules.project_id = ?
@@ -645,6 +693,8 @@ export function loadIndex(cwd = process.cwd()) {
     shares: shares.map((share) => ({
       token: share.token,
       capsuleId: share.capsule_id,
+      artifactType: share.artifact_type || "capsule",
+      artifactId: share.artifact_id || share.capsule_id,
       createdAt: share.created_at,
       expiresAt: share.expires_at,
       visibility: share.visibility
@@ -774,6 +824,82 @@ export function readCapsuleArtifacts(cwd = process.cwd(), ref) {
     "decisions.md": normalizedText(row.decisions_md),
     "next-actions.md": normalizedText(row.next_actions_md)
   };
+}
+
+export function saveRequirementCapsule(cwd, requirement) {
+  const project = ensureProject(cwd);
+  const projectId = requirement.projectId || requirement.project?.id || project.id;
+  const now = nowIso();
+  const createdAt = requirement.createdAt || now;
+  const updatedAt = requirement.updatedAt || now;
+  const payload = {
+    ...requirement,
+    projectId,
+    createdAt,
+    updatedAt
+  };
+
+  openDb().prepare(`
+    INSERT INTO requirement_capsules(
+      id, project_id, title, summary, status, requirement_json, requirement_md, created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      project_id = excluded.project_id,
+      title = excluded.title,
+      summary = excluded.summary,
+      status = excluded.status,
+      requirement_json = excluded.requirement_json,
+      requirement_md = excluded.requirement_md,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.id,
+    projectId,
+    payload.title,
+    payload.summary || "",
+    payload.status || "draft",
+    jsonText(payload),
+    payload.markdown || "",
+    createdAt,
+    updatedAt
+  );
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, projectId);
+  return requirementStorageRef(payload.id);
+}
+
+export function readRequirementCapsule(cwd = process.cwd(), ref) {
+  const value = requirementRefValue(ref);
+  if (!value) return null;
+  const project = ensureProject(cwd);
+  const row = openDb().prepare(`
+    SELECT * FROM requirement_capsules
+    WHERE project_id = ? AND (id = ? OR title = ?)
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(project.id, value, value) || openDb().prepare(`
+    SELECT * FROM requirement_capsules
+    WHERE id = ? OR title = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(value, value);
+  return row ? rowToRequirement(row) : null;
+}
+
+export function listRequirementCapsules(cwd = process.cwd(), options = {}) {
+  const db = openDb();
+  const limit = Math.max(1, Math.min(Number(options.limit || 100), 500));
+  if (options.scope === "team" || options.allProjects) {
+    return db.prepare("SELECT * FROM requirement_capsules ORDER BY updated_at DESC LIMIT ?")
+      .all(limit)
+      .map(rowToRequirement);
+  }
+  const project = ensureProject(cwd);
+  return db.prepare(`
+    SELECT * FROM requirement_capsules
+    WHERE project_id = ?
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(project.id, limit).map(rowToRequirement);
 }
 
 export function saveKnowledgeCapsule(cwd, knowledge) {
@@ -924,10 +1050,12 @@ export function saveShare(cwd, share) {
   ensureProject(cwd);
   const db = openDb();
   db.prepare(`
-    INSERT INTO shares(token, capsule_id, visibility, expires_at, ack, share_json, created_at)
-    VALUES(?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO shares(token, capsule_id, artifact_type, artifact_id, visibility, expires_at, ack, share_json, created_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(token) DO UPDATE SET
       capsule_id = excluded.capsule_id,
+      artifact_type = excluded.artifact_type,
+      artifact_id = excluded.artifact_id,
       visibility = excluded.visibility,
       expires_at = excluded.expires_at,
       ack = excluded.ack,
@@ -935,6 +1063,8 @@ export function saveShare(cwd, share) {
   `).run(
     share.token,
     share.capsuleId,
+    share.artifactType || "capsule",
+    share.artifactId || share.capsuleId,
     share.visibility || "private",
     share.expiresAt || null,
     share.ack ? 1 : 0,

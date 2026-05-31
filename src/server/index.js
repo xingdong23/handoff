@@ -3,7 +3,7 @@ import { readFileSync, existsSync } from "node:fs";
 import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCapsule } from "../core/capsule.js";
-import { createShare } from "../core/share.js";
+import { createKnowledgeShare, createShare } from "../core/share.js";
 import { getDashboard } from "../core/dashboard.js";
 import { inferGitLabConfig, scanGitLab } from "../core/gitlab.js";
 import { deleteCapsule, getProject, gitLabTokenConfigured, listProjects, readCapsule, readShare, saveGitLabToken, updateProjectGitLab } from "../core/store.js";
@@ -41,27 +41,40 @@ function serveStatic(res, pathname) {
   return true;
 }
 
+function escapeHtml(value) {
+  return String(value || "").replace(/[<>&"]/g, (ch) => ({
+    "<": "&lt;",
+    ">": "&gt;",
+    "&": "&amp;",
+    "\"": "&quot;"
+  })[ch]);
+}
+
 function sharePage(share) {
-  const capsule = share.capsule;
+  const item = share.knowledge || share.capsule || {};
+  const body = share.knowledge
+    ? share.knowledge.markdown || share.knowledge.summary || ""
+    : share.capsule?.contextPack?.recoveryPrompt || "";
+  const eyebrow = share.knowledge ? "Handoff Knowledge Capsule" : "Handoff Share Pack";
   return [
     "<!doctype html>",
     "<html lang=\"zh-CN\">",
     "<head>",
     "<meta charset=\"utf-8\">",
     "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
-    `<title>${capsule.title} - Handoff</title>`,
+    `<title>${escapeHtml(item.title)} - Handoff</title>`,
     "<link rel=\"stylesheet\" href=\"/styles.css\">",
     "</head>",
     "<body>",
     "<main class=\"share-page\">",
     "<section class=\"share-hero\">",
-    "<p class=\"eyebrow\">Handoff Share Pack</p>",
-    `<h1>${capsule.title}</h1>`,
-    `<p>${capsule.summary}</p>`,
+    `<p class=\"eyebrow\">${eyebrow}</p>`,
+    `<h1>${escapeHtml(item.title)}</h1>`,
+    `<p>${escapeHtml(item.summary)}</p>`,
     "</section>",
     "<section class=\"panel\">",
-    "<h2>Recovery Prompt</h2>",
-    `<pre>${capsule.contextPack.recoveryPrompt.replace(/[<>&]/g, (ch) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;" })[ch])}</pre>`,
+    `<h2>${share.knowledge ? "Knowledge Capsule" : "Recovery Prompt"}</h2>`,
+    `<pre>${escapeHtml(body)}</pre>`,
     "</section>",
     "</main>",
     "</body>",
@@ -156,7 +169,9 @@ export function createHandoffServer({ workspace }) {
 
       if (req.method === "POST" && pathname === "/api/share") {
         const body = await readBody(req);
-        const share = createShare(workspace, body.capsuleId, body);
+        const share = body.knowledgeId
+          ? createKnowledgeShare(workspace, body.knowledgeId, body)
+          : createShare(workspace, body.capsuleId, body);
         return sendJson(res, share, 201);
       }
 

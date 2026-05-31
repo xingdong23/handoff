@@ -186,11 +186,12 @@ function buildMemoryMarkdown(memory) {
 
 export function buildTeamMemory(cwd = process.cwd(), options = {}) {
   const scope = options.scope || "team";
+  const minScore = Math.max(0, Math.min(Number(options.minScore || 0), 100));
   const sources = listKnowledgeCapsules(cwd, {
     scope,
     allProjects: scope === "team",
     limit: options.limit || 200
-  });
+  }).filter((source) => Number(source.quality?.score || 0) >= minScore);
   const createdAt = nowIso();
   const topics = {};
 

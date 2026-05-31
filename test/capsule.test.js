@@ -6,10 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createCapsule } from "../src/core/capsule.js";
 import { deleteCapsule, gitLabTokenConfigured, listProjects, loadGitLabToken, readCapsule, readCapsuleArtifacts, readShare, saveGitLabToken } from "../src/core/store.js";
-import { createShare } from "../src/core/share.js";
+import { createKnowledgeShare, createShare } from "../src/core/share.js";
 import { computeAttention } from "../src/core/reminders.js";
 import { getDashboard } from "../src/core/dashboard.js";
 import { buildTeamMemory, createKnowledgeCapsule, listTeamMemorySnapshots, readKnowledgeCapsule } from "../src/core/knowledge.js";
+import { analyzeRequirement, readRequirementCapsule } from "../src/core/requirement.js";
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -289,15 +290,53 @@ test("extracts a knowledge capsule and builds team memory", () => {
   });
 
   const knowledge = createKnowledgeCapsule(cwd, capsule.id);
+  const lowSignal = createCapsule({
+    cwd,
+    title: "low signal",
+    input: JSON.stringify({ summary: "Short note only" }),
+    source: "test"
+  }).capsule;
+  createKnowledgeCapsule(cwd, lowSignal.id);
 
   assert.equal(knowledge.capsuleId, capsule.id);
   assert.equal(knowledge.decisions[0], "Use exponential backoff");
   assert.match(knowledge.storage, /^sqlite:/);
   assert.equal(readKnowledgeCapsule(cwd, knowledge.id).facts[0], "RetryScheduler owns retry dispatch");
 
-  const memory = buildTeamMemory(cwd, { scope: "team" });
+  const share = createKnowledgeShare(cwd, knowledge.id, { visibility: "team" });
+  assert.equal(share.artifactType, "knowledge");
+  assert.equal(share.artifactId, knowledge.id);
+  assert.equal(readShare(cwd, share.token).knowledge.id, knowledge.id);
+
+  const memory = buildTeamMemory(cwd, { scope: "team", minScore: 70 });
 
   assert.equal(memory.sourceCount, 1);
   assert.match(memory.markdown, /Use exponential backoff/);
   assert.equal(listTeamMemorySnapshots({ limit: 1 })[0].id, memory.id);
+});
+
+test("analyzes a requirement document into a requirement capsule", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+  const requirement = analyzeRequirement(
+    cwd,
+    JSON.stringify({
+      summary: "Payment callback timeout must be reduced during peak traffic.",
+      background: "Callbacks wait too long for pooled connections.",
+      goals: ["Reduce timeout rate below 0.1%"],
+      scope: ["Tune connection pool", "Cap retry attempts"],
+      acceptanceCriteria: ["Load test passes", "Callback success rate meets target"],
+      openQuestions: ["Whether rollout needs a feature switch"],
+      systems: ["payment-service"],
+      files: ["src/payment/callback.ts"],
+      tasks: ["Add load test", "Update config notes"]
+    }),
+    { title: "payment callback timeout" }
+  );
+
+  assert.match(requirement.id, /^req_/);
+  assert.equal(requirement.goals[0], "Reduce timeout rate below 0.1%");
+  assert.equal(requirement.acceptanceCriteria.length, 2);
+  assert.match(requirement.markdown, /Acceptance Criteria/);
+  assert.equal(readRequirementCapsule(cwd, requirement.id).openQuestions[0], "Whether rollout needs a feature switch");
 });

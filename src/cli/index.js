@@ -4,7 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "./args.js";
 import { createCapsule, formatGitRequirementStatus } from "../core/capsule.js";
-import { createShare } from "../core/share.js";
+import { createKnowledgeShare, createShare } from "../core/share.js";
 import { getDashboard } from "../core/dashboard.js";
 import { deleteCapsule, readCapsule, readShare, ensureWorkspace, loadConfig, saveConfig, listCapsules } from "../core/store.js";
 import { scanGitLab } from "../core/gitlab.js";
@@ -20,6 +20,12 @@ import {
   readKnowledgeCapsule,
   readTeamMemorySnapshot
 } from "../core/knowledge.js";
+import {
+  analyzeRequirement,
+  formatRequirementMarkdown,
+  listRequirementCapsules,
+  readRequirementCapsule
+} from "../core/requirement.js";
 import { startServer } from "../server/index.js";
 
 const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), "../../package.json");
@@ -38,9 +44,13 @@ function usage() {
     "  handoff delete <capsule-id>",
     "  handoff import <capsule-id-or-share-url>",
     "  handoff attach <capsule-id>",
+    "  handoff requirement analyze <title> --from <file> --json",
+    "  handoff requirement analyze <title> --stdin",
+    "  handoff requirement list --json",
     "  handoff knowledge extract <capsule-id> --json",
+    "  handoff knowledge share <knowledge-id>",
     "  handoff knowledge list --scope team --json",
-    "  handoff memory build --scope team --json",
+    "  handoff memory build --scope team --min-score 70 --json",
     "  handoff memory latest --json",
     "  handoff status --json",
     "  handoff open --port 7349 --workspace <dir>",
@@ -252,6 +262,52 @@ async function commandAttach(args) {
   process.stdout.write(`${lines.join("\n")}\n`);
 }
 
+async function commandRequirement(args) {
+  const sub = args._[1];
+  if (sub === "analyze") {
+    const title = args._[2] || args.title || "";
+    const input = args.from
+      ? readFileSync(args.from, "utf8")
+      : args.stdin
+        ? await readStdin()
+        : await readStdin();
+    const requirement = analyzeRequirement(process.cwd(), input, {
+      title,
+      summary: args.summary,
+      status: args.status,
+      source: args.source || (args.from ? "file" : "manual"),
+      projectId: args.project
+    });
+    if (args.json) return printJson(requirement);
+    process.stdout.write(`${requirement.id}\n${requirement.storage}\n`);
+    return;
+  }
+
+  if (sub === "show") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Requirement capsule id is required");
+    const requirement = readRequirementCapsule(process.cwd(), ref);
+    if (!requirement) throw new Error(`Requirement capsule not found: ${ref}`);
+    if (args.json) return printJson(requirement);
+    process.stdout.write(`${requirement.markdown || formatRequirementMarkdown(requirement)}\n`);
+    return;
+  }
+
+  if (sub === "list" || !sub) {
+    const items = listRequirementCapsules(process.cwd(), {
+      scope: args.scope || "project",
+      limit: args.limit
+    });
+    if (args.json) return printJson(items);
+    for (const item of items) {
+      process.stdout.write(`${item.id}  ${item.status}  ${item.title}\n`);
+    }
+    return;
+  }
+
+  throw new Error("Supported requirement commands: handoff requirement analyze <title>, handoff requirement list, handoff requirement show <requirement-id>");
+}
+
 async function commandKnowledge(args) {
   const sub = args._[1];
   if (sub === "extract") {
@@ -277,6 +333,20 @@ async function commandKnowledge(args) {
     return;
   }
 
+  if (sub === "share") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Knowledge capsule id is required");
+    const share = createKnowledgeShare(process.cwd(), ref, {
+      visibility: args.visibility || "team",
+      expiresInDays: args["expires-days"]
+    });
+    const port = args.port || process.env.HANDOFF_PORT || 7349;
+    process.stdout.write(`token=${share.token}\n`);
+    process.stdout.write(`url=http://localhost:${port}/s/${share.token}\n`);
+    process.stdout.write(`api=http://localhost:${port}/api/share/${share.token}\n`);
+    return;
+  }
+
   if (sub === "list" || !sub) {
     const items = listKnowledgeCapsules(process.cwd(), {
       scope: args.scope || "project",
@@ -289,7 +359,7 @@ async function commandKnowledge(args) {
     return;
   }
 
-  throw new Error("Supported knowledge commands: handoff knowledge extract <capsule-id>, handoff knowledge list, handoff knowledge show <knowledge-id>");
+  throw new Error("Supported knowledge commands: handoff knowledge extract <capsule-id>, handoff knowledge share <knowledge-id>, handoff knowledge list, handoff knowledge show <knowledge-id>");
 }
 
 async function commandMemory(args) {
@@ -297,7 +367,8 @@ async function commandMemory(args) {
   if (sub === "build") {
     const memory = buildTeamMemory(process.cwd(), {
       scope: args.scope || "team",
-      limit: args.limit
+      limit: args.limit,
+      minScore: args["min-score"]
     });
     if (args.json) return printJson(memory);
     process.stdout.write(`${memory.id}\n${memory.storage}\n`);
@@ -425,6 +496,7 @@ export async function runCli(argv) {
   if (command === "delete" || command === "rm") return commandDelete(args);
   if (command === "import") return commandImport(args);
   if (command === "attach") return commandAttach(args);
+  if (command === "requirement") return commandRequirement(args);
   if (command === "knowledge") return commandKnowledge(args);
   if (command === "memory") return commandMemory(args);
   if (command === "status") return commandStatus(args);

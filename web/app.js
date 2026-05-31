@@ -264,6 +264,7 @@ function renderMetrics(totals) {
   const root = document.querySelector("#overview");
   root.replaceChildren(
     metric({ label: "项目", value: totals.projects, detail: "已接入 Handoff", tone: "blue", iconName: "project" }),
+    metric({ label: "需求", value: totals.requirements || 0, detail: "Requirement", tone: "slate", iconName: "project" }),
     metric({ label: "进行中", value: totals.activeCapsules, detail: "可继续处理", tone: "green", iconName: "active" }),
     metric({ label: "Capsule", value: totals.capsules, detail: "会话资产", tone: "violet", iconName: "capsule" }),
     metric({ label: "未合并 MR", value: totals.openMrs, detail: "GitLab 扫描", tone: "amber", iconName: "merge" }),

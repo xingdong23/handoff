@@ -7,6 +7,16 @@ description: Capture, import, attach, share, and track AI conversation assets wi
 
 Handoff turns an AI conversation into a reusable Capsule. A Capsule should contain a readable title, current state, progress, decisions, confirmed facts, related files, next actions, and the Git requirement status for the files that belong to the current demand.
 
+## Requirement Capsule
+
+Use requirement analysis when a PRD, demand note, or meeting note should become structured project context before implementation starts.
+
+```bash
+handoff requirement analyze "<short-readable-title>" --stdin
+```
+
+Prefer structured input with title, summary, background, goals, scope, nonGoals, personas, flows, acceptanceCriteria, openQuestions, systems, files, impacts, and tasks. The returned Requirement Capsule can be used as source context for later Capture, Knowledge Capsule extraction, and Team Memory.
+
 ## Capture
 
 Use capture when the current conversation contains useful context that should survive beyond the current chat.
@@ -70,6 +80,12 @@ handoff knowledge extract "<capsule-id>"
 
 The returned Knowledge Capsule keeps the reusable summary, topics, facts, decisions, files, commands, next actions, and source Capsule reference.
 
+Share a Knowledge Capsule when team members need to read it without restoring the full source conversation.
+
+```bash
+handoff knowledge share "<knowledge-id>"
+```
+
 ## Team Memory
 
 Use team memory when existing Knowledge Capsules should be merged into a team-level memory snapshot.
@@ -79,6 +95,7 @@ handoff memory build --scope team
 ```
 
 Use `--scope project` when only the current project should be included.
+Use `--min-score 70` when only Knowledge Capsules with enough quality signals should be included.
 
 ## Dashboard
 

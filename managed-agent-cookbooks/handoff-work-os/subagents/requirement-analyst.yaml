@@ -1,0 +1,71 @@
+name: handoff-requirement-analyst
+model: claude-opus-4-7
+system:
+  text: |
+    You analyze PRDs, demand notes, and meeting notes into a Handoff Requirement Capsule. Return only structured fields: title, summary, status, background, goals, scope, nonGoals, personas, flows, acceptanceCriteria, openQuestions, systems, files, impacts, and tasks. Preserve source facts and keep open questions separate from confirmed requirements.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+mcp_servers: []
+skills:
+  - { from_plugin: ../../../plugins/vertical-plugins/handoff-core }
+callable_agents: []
+output_schema:
+  type: object
+  required: [title, summary, status]
+  additionalProperties: true
+  properties:
+    title: { type: string, maxLength: 120 }
+    summary: { type: string, maxLength: 1200 }
+    status: { type: string, maxLength: 80 }
+    background: { type: string, maxLength: 1600 }
+    goals:
+      type: array
+      maxItems: 30
+      items: { type: string, maxLength: 300 }
+    scope:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }
+    nonGoals:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }
+    personas:
+      type: array
+      maxItems: 30
+      items: { type: string, maxLength: 300 }
+    flows:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    acceptanceCriteria:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }
+    openQuestions:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    systems:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }
+    files:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }
+    impacts:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    tasks:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }

@@ -1,9 +1,10 @@
 import { getGitSnapshot } from "./git.js";
 import { inferGitLabConfig } from "./gitlab.js";
-import { ensureWorkspace, listCapsulesForProject, listProjects, loadGitLabStateForProject } from "./store.js";
+import { ensureWorkspace, listCapsulesForProject, listProjects, listRequirementCapsules, loadGitLabStateForProject } from "./store.js";
 import { computeAttention } from "./reminders.js";
 
 function summarizeProject(project) {
+  const requirements = listRequirementCapsules(project.root);
   const capsules = listCapsulesForProject(project.id);
   const git = getGitSnapshot(project.root);
   const gitlab = loadGitLabStateForProject(project.id);
@@ -27,6 +28,7 @@ function summarizeProject(project) {
       detected: detectedGitLab
     },
     metrics: {
+      requirements: requirements.length,
       capsules: capsules.length,
       activeCapsules,
       openMrs,
@@ -34,6 +36,7 @@ function summarizeProject(project) {
       dirtyFiles: git.dirtyFiles.length,
       attention: attention.length
     },
+    requirements,
     capsules,
     git,
     gitlab: {
@@ -57,6 +60,7 @@ export function getDashboard(baseDir = process.cwd()) {
   const totals = projects.reduce(
     (acc, item) => {
       acc.projects += 1;
+      acc.requirements += item.metrics.requirements;
       acc.capsules += item.metrics.capsules;
       acc.activeCapsules += item.metrics.activeCapsules;
       acc.openMrs += item.metrics.openMrs;
@@ -67,6 +71,7 @@ export function getDashboard(baseDir = process.cwd()) {
     },
     {
       projects: 0,
+      requirements: 0,
       capsules: 0,
       activeCapsules: 0,
       openMrs: 0,
