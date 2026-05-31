@@ -1,1 +1,1 @@
-../../../../commands/handoff/status.md
+../../../vertical-plugins/handoff-core/commands/handoff/status.md

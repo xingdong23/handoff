@@ -9,7 +9,7 @@
       "name": "handoff-core",
       "displayName": "Handoff Core",
       "source": "./plugins/vertical-plugins/handoff-core",
-      "description": "Core skills for AI chat capsules, recovery prompts, scoped Git status, and GitLab delivery tracking.",
+      "description": "Core skills and slash commands for AI chat capsules, recovery prompts, scoped Git status, and GitLab delivery tracking.",
       "version": "0.1.0",
       "author": {
         "name": "Handoff Contributors"

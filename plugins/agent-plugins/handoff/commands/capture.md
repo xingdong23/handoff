@@ -1,1 +1,1 @@
-../../../../commands/handoff/capture.md
+../../../vertical-plugins/handoff-core/commands/handoff/capture.md

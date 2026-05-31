@@ -1,1 +1,1 @@
-../../../../commands/handoff/import.md
+../../../vertical-plugins/handoff-core/commands/handoff/import.md

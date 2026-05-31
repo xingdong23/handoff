@@ -1,1 +1,1 @@
-../../../../commands/handoff/attach.md
+../../../vertical-plugins/handoff-core/commands/handoff/attach.md

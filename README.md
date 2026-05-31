@@ -96,7 +96,7 @@ claude plugin install handoff@handoff-marketplace
 claude plugin enable handoff
 ```
 
-核心 Skill 包也可以单独安装：
+核心能力包也可以单独安装。它包含 Handoff 的可复用 Skill 与 Slash Command 模板：
 
 ```bash
 claude plugin install handoff-core@handoff-marketplace
@@ -338,11 +338,12 @@ flowchart LR
 | 目录 | 作用 |
 | --- | --- |
 | `bin/` | CLI 入口 |
-| `commands/handoff/` | Slash Command 模板 |
+| `commands/handoff/` | Slash Command 兼容入口，链接到核心能力包 |
 | `.claude/commands/handoff/` | 本地 Claude Code 命令 |
 | `.claude-plugin/` | Claude Code 插件市场清单 |
 | `plugins/agent-plugins/handoff/` | 完整 Handoff Work OS Agent 插件，包含 Agent Prompt、Skill、Commands、CLI 和大盘入口 |
-| `plugins/vertical-plugins/handoff-core/` | Handoff 核心能力包，放置可复用 Skill |
+| `plugins/vertical-plugins/handoff-core/commands/handoff/` | Handoff Slash Command 模板来源 |
+| `plugins/vertical-plugins/handoff-core/skills/` | Handoff 可复用 Skill 来源 |
 | `plugins/handoff/` | 兼容旧入口，指向 `plugins/agent-plugins/handoff/` |
 | `managed-agent-cookbooks/handoff-work-os/` | 托管 Agent 模板，包含 orchestrator 与子 Agent 配置 |
 | `scripts/` | 仓库检查脚本 |

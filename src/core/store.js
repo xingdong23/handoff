@@ -103,11 +103,41 @@ function migrate(db) {
       payload_json TEXT NOT NULL,
       scanned_at TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS knowledge_capsules (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      capsule_id TEXT NOT NULL REFERENCES capsules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      topics_json TEXT NOT NULL,
+      facts_json TEXT NOT NULL,
+      decisions_json TEXT NOT NULL,
+      files_json TEXT NOT NULL,
+      commands_json TEXT NOT NULL,
+      knowledge_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, capsule_id)
+    );
+
+    CREATE TABLE IF NOT EXISTS team_memory_snapshots (
+      id TEXT PRIMARY KEY,
+      title TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      memory_json TEXT NOT NULL,
+      memory_md TEXT NOT NULL,
+      source_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
   `);
   ensureColumn(db, "projects", "gitlab_token", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "capsules", "conversation_key", "TEXT NOT NULL DEFAULT ''");
   db.exec("CREATE INDEX IF NOT EXISTS idx_capsules_conversation_key ON capsules(project_id, conversation_key);");
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '1')").run();
+  db.exec("CREATE INDEX IF NOT EXISTS idx_knowledge_capsules_capsule ON knowledge_capsules(project_id, capsule_id);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_team_memory_created ON team_memory_snapshots(created_at DESC);");
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '2')").run();
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -209,6 +239,14 @@ function rowToConfig(row) {
 
 function storageRef(id) {
   return `sqlite:${dbPath()}#capsules/${encodeURIComponent(id)}`;
+}
+
+function knowledgeStorageRef(id) {
+  return `sqlite:${dbPath()}#knowledge/${encodeURIComponent(id)}`;
+}
+
+function memoryStorageRef(id) {
+  return `sqlite:${dbPath()}#team-memory/${encodeURIComponent(id)}`;
 }
 
 function capsuleConversationKey(capsule) {
@@ -436,6 +474,40 @@ function hydrateCapsule(row) {
   if (!capsule) return null;
   const title = capsuleTitle(row, capsule);
   return title && title !== capsule.title ? { ...capsule, title } : capsule;
+}
+
+function rowToKnowledge(row) {
+  const knowledge = parseJson(row.knowledge_json, null) || {};
+  return {
+    ...knowledge,
+    id: row.id,
+    capsuleId: row.capsule_id,
+    title: row.title,
+    summary: row.summary,
+    topics: parseJson(row.topics_json, knowledge.topics || []),
+    facts: parseJson(row.facts_json, knowledge.facts || []),
+    decisions: parseJson(row.decisions_json, knowledge.decisions || []),
+    files: parseJson(row.files_json, knowledge.files || []),
+    commands: parseJson(row.commands_json, knowledge.commands || []),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    storage: knowledgeStorageRef(row.id)
+  };
+}
+
+function rowToTeamMemory(row) {
+  const memory = parseJson(row.memory_json, null) || {};
+  return {
+    ...memory,
+    id: row.id,
+    title: row.title,
+    scope: row.scope,
+    markdown: row.memory_md,
+    sourceCount: row.source_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    storage: memoryStorageRef(row.id)
+  };
 }
 
 function capsuleRefValue(ref) {

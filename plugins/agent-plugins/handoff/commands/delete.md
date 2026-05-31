@@ -1,1 +1,1 @@
-../../../../commands/handoff/delete.md
+../../../vertical-plugins/handoff-core/commands/handoff/delete.md

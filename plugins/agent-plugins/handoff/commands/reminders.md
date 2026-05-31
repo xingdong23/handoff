@@ -1,1 +1,1 @@
-../../../../commands/handoff/reminders.md
+../../../vertical-plugins/handoff-core/commands/handoff/reminders.md

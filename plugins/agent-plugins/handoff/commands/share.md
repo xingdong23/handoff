@@ -1,1 +1,1 @@
-../../../../commands/handoff/share.md
+../../../vertical-plugins/handoff-core/commands/handoff/share.md

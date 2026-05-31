@@ -19,7 +19,8 @@
     "dev": "node ./bin/handoff.js dashboard --port 7349",
     "test": "node --test",
     "check": "node --check ./bin/handoff.js && node --check ./src/cli/index.js && node --check ./src/server/index.js && node --test",
-    "plugin:validate": "claude plugin validate .claude-plugin/marketplace.json --strict && claude plugin validate plugins/agent-plugins/handoff --strict && claude plugin validate plugins/vertical-plugins/handoff-core --strict"
+    "plugin:sync": "node ./scripts/sync-plugin-layout.js",
+    "plugin:validate": "npm run plugin:sync && claude plugin validate .claude-plugin/marketplace.json --strict && claude plugin validate plugins/agent-plugins/handoff --strict && claude plugin validate plugins/vertical-plugins/handoff-core --strict"
   },
   "keywords": [
     "ai",

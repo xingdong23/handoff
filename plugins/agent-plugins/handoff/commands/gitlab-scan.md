@@ -1,1 +1,1 @@
-../../../../commands/handoff/gitlab-scan.md
+../../../vertical-plugins/handoff-core/commands/handoff/gitlab-scan.md
