@@ -547,6 +547,26 @@ tbody tr:last-child td {
   color: #1d4ed8;
 }
 
+.badge.approved,
+.badge.available,
+.badge.published {
+  border-color: #bbf7d0;
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.badge.rejected {
+  border-color: #fecaca;
+  background: var(--red-soft);
+  color: var(--red);
+}
+
+.badge.submitted {
+  border-color: #fde68a;
+  background: var(--amber-soft);
+  color: var(--amber);
+}
+
 .badge.success,
 .badge.merged,
 .badge.can_be_merged {

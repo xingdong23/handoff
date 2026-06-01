@@ -10,7 +10,7 @@
       "displayName": "Handoff Core",
       "source": "./plugins/vertical-plugins/handoff-core",
       "description": "Core skills and slash commands for AI chat capsules, unified AI assets, Skill Assets, recovery prompts, scoped Git status, and GitLab delivery tracking.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "Handoff Contributors"
       },
@@ -22,7 +22,7 @@
       "displayName": "Handoff Work OS",
       "source": "./plugins/agent-plugins/handoff",
       "description": "Capture, share, import unified AI assets, review Skill Assets, and track AI chat capsules across projects with a shared local SQLite dashboard.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "author": {
         "name": "Handoff Contributors"
       },

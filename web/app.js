@@ -36,8 +36,14 @@ function normalizeStatus(value) {
 
 function statusLabel(value) {
   const labels = {
+    approved: "已审核",
+    available: "可用",
+    draft: "草稿",
     in_progress: "进行中",
     opened: "已打开",
+    published: "已发布",
+    rejected: "已驳回",
+    submitted: "待审核",
     failed: "失败",
     success: "通过",
     running: "运行中",
@@ -114,6 +120,16 @@ function allCapsules(projects) {
   return projects.flatMap((project) =>
     project.capsules.map((capsule) => ({
       ...capsule,
+      projectName: project.name,
+      projectRoot: project.root
+    }))
+  );
+}
+
+function allAssets(projects) {
+  return projects.flatMap((project) =>
+    (project.assets || []).map((asset) => ({
+      ...asset,
       projectName: project.name,
       projectRoot: project.root
     }))
@@ -333,41 +349,153 @@ function attentionAction(item) {
   return link;
 }
 
-function renderCapsules(projects) {
-  const capsules = allCapsules(projects);
+function assetTypeLabel(asset) {
+  if (asset.type === "capsule") return "Capsule";
+  if (asset.type === "knowledge") return "Knowledge";
+  if (asset.type === "skill") return asset.assetType ? `Skill / ${asset.assetType}` : "Skill";
+  return asset.type || "Asset";
+}
+
+function assetImportTitle(asset) {
+  if (asset.type === "capsule") return "接续完整会话";
+  if (asset.type === "knowledge") return "导入项目知识";
+  if (asset.type === "skill") return "导入团队 Skill";
+  return "导入资产上下文";
+}
+
+function assetImportText(asset) {
+  const payload = asset.payload || {};
+  if (asset.type === "capsule") return payload.contextPack?.recoveryPrompt || "暂无恢复提示词。";
+  if (asset.type === "knowledge") {
+    return [
+      `# Handoff Knowledge Import: ${asset.title}`,
+      "",
+      `Knowledge: ${asset.id}`,
+      `Source Capsule: ${payload.capsuleId || asset.source?.id || ""}`,
+      "",
+      "请把以下内容作为当前 AI 对话的项目知识上下文：",
+      "",
+      payload.markdown || asset.summary || ""
+    ].join("\n");
+  }
+  if (asset.type === "skill") {
+    return [
+      `# Handoff Skill Import: ${asset.title}`,
+      "",
+      `Asset: ${asset.id}`,
+      `Type: ${asset.assetType || "skill"}`,
+      `Status: ${asset.status}`,
+      "",
+      "请把以下内容作为当前 AI 对话的可用 Skill 或经验上下文：",
+      "",
+      payload.content || payload.markdown || asset.summary || ""
+    ].join("\n");
+  }
+  return asset.summary || "";
+}
+
+function assetFiles(asset) {
+  const payload = asset.payload || {};
+  if (asset.type === "capsule") return payload.contextPack?.files || [];
+  if (asset.type === "knowledge") return payload.files || [];
+  return [];
+}
+
+async function shareAsset(asset) {
+  const response = await fetch("/api/share", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      assetId: asset.id,
+      visibility: asset.type === "capsule" ? "private" : "team"
+    })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "分享失败");
+  const base = window.location.origin;
+  return [
+    `token=${data.token}`,
+    `url=${base}/s/${data.token}`,
+    `api=${base}/api/share/${data.token}`
+  ].join("\n");
+}
+
+function renderAssets(projects) {
+  const assets = allAssets(projects);
   const list = document.querySelector("#capsule-list");
-  document.querySelector("#capsule-count").textContent = `${capsules.length} 个`;
-  if (!capsules.length) {
-    list.replaceChildren(emptyState("暂无 Capsule", "在 Claude Code 中使用 /handoff:capture 生成第一份会话资产。"));
+  document.querySelector("#capsule-count").textContent = `${assets.length} 个`;
+  if (!assets.length) {
+    list.replaceChildren(emptyState("暂无 AI 资产", "使用 /handoff:capture、/handoff:knowledge-ingest 或 /handoff:skill-ingest 生成第一份资产。"));
     return;
   }
 
   list.replaceChildren(
-    ...capsules.map((capsule) => {
+    ...assets.map((asset) => {
       const card = el("article", "capsule-card");
       const title = el("div", "capsule-title");
-      title.append(el("strong", "", capsule.title), badge(capsule.progress?.status || "in_progress"));
-      const summary = el("p", "", compact(capsule.summary || "暂无摘要", 150));
+      title.append(el("strong", "", asset.title), badge(asset.status || "available"));
+      const summary = el("p", "", compact(asset.summary || "暂无摘要", 170));
       const meta = el("div", "capsule-meta");
-      const repo = gitRequirementRepo(capsule);
-      meta.append(el("span", "", capsule.source?.app || "manual"), el("span", "", capsule.projectName), el("span", "", `${percent(capsule.progress?.percent)}%`));
-      if (repo?.branch) meta.append(el("span", "", repo.branch));
-      if (repo) {
-        meta.append(el("span", "", gitStatusValue(repo.committed)));
-        meta.append(el("span", "", pushStatusValue(repo.pushed)));
+      meta.append(
+        el("span", "asset-type", assetTypeLabel(asset)),
+        el("span", "", asset.scope || "project"),
+        el("span", "", asset.projectName)
+      );
+      if (asset.source?.type || asset.source?.app) meta.append(el("span", "", asset.source.type || asset.source.app));
+      if (asset.type === "capsule") {
+        const repo = gitRequirementRepo(asset.payload || {});
+        const progress = asset.payload?.progress?.percent;
+        meta.append(el("span", "", `${percent(progress)}%`));
+        if (repo?.branch) meta.append(el("span", "", repo.branch));
+        if (repo) {
+          meta.append(el("span", "", gitStatusValue(repo.committed)));
+          meta.append(el("span", "", pushStatusValue(repo.pushed)));
+        }
       }
       const actions = el("div", "capsule-actions");
       const importButton = el("button", "mini-button primary", "Import");
-      const attachButton = el("button", "mini-button", "Attach");
-      const deleteButton = el("button", "mini-button danger", "删除");
-      importButton.addEventListener("click", () => openImportDialog(capsule.id));
-      attachButton.addEventListener("click", () => openAttachDialog(capsule));
-      deleteButton.addEventListener("click", () => deleteCapsule(capsule));
-      actions.append(importButton, attachButton, deleteButton);
-      card.append(title, summary, progressBar(capsule.progress?.percent || 0), meta, actions);
+      const shareButton = el("button", "mini-button", "Share");
+      importButton.addEventListener("click", () => openContextDialog({
+        kicker: assetTypeLabel(asset),
+        title: assetImportTitle(asset),
+        text: assetImportText(asset),
+        files: assetFiles(asset)
+      }));
+      shareButton.addEventListener("click", async () => {
+        try {
+          const text = await shareAsset(asset);
+          openContextDialog({
+            kicker: "Share",
+            title: "分享资产",
+            text,
+            files: [asset.id]
+          });
+        } catch (error) {
+          window.alert(error instanceof Error ? error.message : String(error));
+        }
+      });
+      actions.append(importButton, shareButton);
+      if (asset.type === "capsule") {
+        const attachButton = el("button", "mini-button", "Attach");
+        const deleteButton = el("button", "mini-button danger", "删除");
+        attachButton.addEventListener("click", () => openAttachDialog(asset.payload || {}));
+        deleteButton.addEventListener("click", () => deleteCapsule(asset.payload || asset));
+        actions.append(attachButton, deleteButton);
+      }
+      if (asset.type === "skill" && !["approved", "published"].includes(asset.status)) {
+        actions.append(badge("submitted", "需审核"));
+      }
+      card.append(title, summary);
+      if (asset.type === "capsule") card.append(progressBar(asset.payload?.progress?.percent || 0));
+      card.append(meta, actions);
       card.addEventListener("click", (event) => {
         if (event.target.closest("button")) return;
-        loadCapsule(capsule.id);
+        openContextDialog({
+          kicker: assetTypeLabel(asset),
+          title: assetImportTitle(asset),
+          text: assetImportText(asset),
+          files: assetFiles(asset)
+        });
       });
       return card;
     })
@@ -500,7 +628,7 @@ function renderAll() {
   renderMetrics(state.dashboard.totals);
   renderSideRail(projects);
   renderAttention(projects);
-  renderCapsules(projects);
+  renderAssets(projects);
   renderMergeRequests(projects);
   applySideState();
 }
