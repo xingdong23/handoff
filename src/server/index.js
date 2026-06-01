@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createCapsule } from "../core/capsule.js";
 import { createKnowledgeShare, createShare } from "../core/share.js";
 import { createSkillAssetShare } from "../core/skill-platform.js";
-import { createAssetShare, listAssets, readAsset } from "../core/assets.js";
+import { convertAsset, createAssetShare, listAssets, readAsset } from "../core/assets.js";
 import { getDashboard } from "../core/dashboard.js";
 import { inferGitLabConfig, scanGitLab } from "../core/gitlab.js";
 import { deleteCapsule, getProject, gitLabTokenConfigured, listProjects, readCapsule, readShare, saveGitLabToken, updateProjectGitLab } from "../core/store.js";
@@ -164,6 +164,15 @@ export function createHandoffServer({ workspace }) {
         const id = decodeURIComponent(pathname.split("/").pop() || "");
         const asset = readAsset(workspace, id);
         return asset ? sendJson(res, asset) : sendJson(res, { error: "not found" }, 404);
+      }
+
+      if (req.method === "POST" && pathname.startsWith("/api/assets/") && pathname.endsWith("/convert")) {
+        const parts = pathname.split("/");
+        const id = decodeURIComponent(parts[3] || "");
+        const body = await readBody(req);
+        if (!body.target) return sendJson(res, { error: "target is required" }, 400);
+        const result = convertAsset(workspace, id, body.target, body);
+        return sendJson(res, result, 201);
       }
 
       if (req.method === "DELETE" && pathname.startsWith("/api/capsules/")) {

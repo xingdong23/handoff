@@ -420,6 +420,58 @@ async function shareAsset(asset) {
   ].join("\n");
 }
 
+async function convertAsset(asset, target) {
+  const response = await fetch(`/api/assets/${encodeURIComponent(asset.id)}/convert`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ target })
+  });
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "转换失败");
+  await loadDashboard();
+  return data;
+}
+
+function conversionButtons(asset) {
+  const buttons = [];
+  const addButton = (label, target) => {
+    const button = el("button", "mini-button", label);
+    button.addEventListener("click", async () => {
+      try {
+        button.disabled = true;
+        button.textContent = "转换中";
+        const result = await convertAsset(asset, target);
+        openContextDialog({
+          kicker: "Convert",
+          title: "资产转换完成",
+          text: [
+            `source=${result.source?.id || asset.id}`,
+            `target=${result.target?.id || ""}`,
+            `type=${result.target?.type || target}`,
+            `title=${result.target?.title || ""}`
+          ].join("\n"),
+          files: [result.target?.id || ""]
+        });
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : String(error));
+      } finally {
+        button.disabled = false;
+        button.textContent = label;
+      }
+    });
+    buttons.push(button);
+  };
+
+  if (asset.type === "capsule") {
+    addButton("转知识", "knowledge");
+    addButton("转 Skill", "skill");
+  }
+  if (asset.type === "knowledge") {
+    addButton("转 Skill", "skill");
+  }
+  return buttons;
+}
+
 function renderAssets(projects) {
   const assets = allAssets(projects);
   const list = document.querySelector("#capsule-list");
@@ -475,6 +527,7 @@ function renderAssets(projects) {
         }
       });
       actions.append(importButton, shareButton);
+      actions.append(...conversionButtons(asset));
       if (asset.type === "capsule") {
         const attachButton = el("button", "mini-button", "Attach");
         const deleteButton = el("button", "mini-button danger", "删除");

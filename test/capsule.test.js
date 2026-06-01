@@ -21,6 +21,7 @@ import {
   submitSkillAsset
 } from "../src/core/skill-platform.js";
 import {
+  convertAsset,
   createAssetShare,
   importAssetContext,
   ingestKnowledgeAsset,
@@ -440,6 +441,14 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   assert.equal(readAsset(cwd, knowledgeBundle.knowledge.id).type, "knowledge");
   assert.match(importAssetContext(cwd, knowledgeBundle.knowledge.id), /Handoff Knowledge Import/);
 
+  const convertedKnowledge = convertAsset(cwd, knowledgeBundle.capsule.id, "knowledge");
+  assert.equal(convertedKnowledge.target.type, "knowledge");
+  assert.equal(convertedKnowledge.knowledge.capsuleId, knowledgeBundle.capsule.id);
+  const convertedSkill = convertAsset(cwd, knowledgeBundle.capsule.id, "skill");
+  assert.equal(convertedSkill.target.type, "skill");
+  const skillFromKnowledge = convertAsset(cwd, knowledgeBundle.knowledge.id, "skill");
+  assert.equal(skillFromKnowledge.target.type, "skill");
+
   const knowledgeShare = createAssetShare(cwd, knowledgeBundle.knowledge.id, { visibility: "team" });
   assert.equal(readShare(cwd, knowledgeShare.token).knowledge.id, knowledgeBundle.knowledge.id);
   assert.throws(() => createAssetShare(cwd, skillBundle.skill.id), /approved before sharing/);
@@ -448,5 +457,5 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   const skillShare = createAssetShare(cwd, skillBundle.skill.id, { visibility: "team" });
   assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
   assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
-  assert.equal(getDashboard(cwd).totals.assets, 5);
+  assert.equal(getDashboard(cwd).totals.assets, 7);
 });

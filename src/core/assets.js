@@ -7,6 +7,7 @@ import {
   readKnowledgeCapsule
 } from "./knowledge.js";
 import {
+  createSkillAssetFromCapsule,
   createSkillAssetFromKnowledge,
   createSkillAssetShare,
   importSkillAsset,
@@ -176,6 +177,55 @@ export function createAssetShare(cwd = process.cwd(), ref, options = {}) {
   if (asset.type === "knowledge") return createKnowledgeShare(cwd, asset.id, options);
   if (asset.type === "skill") return createSkillAssetShare(cwd, asset.id, options);
   throw new Error(`Unsupported asset type: ${asset.type}`);
+}
+
+export function convertAsset(cwd = process.cwd(), ref, targetType, options = {}) {
+  const asset = readAsset(cwd, ref);
+  if (!asset) throw new Error(`Asset not found: ${ref}`);
+  const target = String(targetType || "").trim().toLowerCase();
+
+  if (asset.type === "capsule" && target === "knowledge") {
+    const knowledge = createKnowledgeCapsule(cwd, asset.id, {
+      title: options.title,
+      summary: options.summary,
+      topics: options.topics
+    });
+    return {
+      source: asset,
+      target: knowledgeAsset(knowledge),
+      knowledge
+    };
+  }
+
+  if (asset.type === "capsule" && target === "skill") {
+    const skill = createSkillAssetFromCapsule(cwd, asset.id, {
+      title: options.title,
+      summary: options.summary,
+      type: options.assetType || options.type || "skill",
+      status: options.status || "submitted"
+    });
+    return {
+      source: asset,
+      target: skillAsset(skill),
+      skill
+    };
+  }
+
+  if (asset.type === "knowledge" && target === "skill") {
+    const skill = createSkillAssetFromKnowledge(cwd, asset.id, {
+      title: options.title,
+      summary: options.summary,
+      type: options.assetType || options.type || "skill",
+      status: options.status || "submitted"
+    });
+    return {
+      source: asset,
+      target: skillAsset(skill),
+      skill
+    };
+  }
+
+  throw new Error(`Unsupported asset conversion: ${asset.type} to ${target || "unknown"}`);
 }
 
 export function ingestKnowledgeAsset(cwd = process.cwd(), input = "", options = {}) {
