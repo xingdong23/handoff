@@ -3,6 +3,7 @@ const state = {
   selectedCapsule: null,
   query: "",
   project: "all",
+  assetTab: "knowledge",
   sideOpen: false
 };
 
@@ -597,6 +598,33 @@ function renderAssetSection(group, assets) {
   return section;
 }
 
+function assetCount(assets, type) {
+  return assets.filter((asset) => asset.type === type).length;
+}
+
+function activeAssetGroup() {
+  return assetGroups.find((group) => group.type === state.assetTab) || assetGroups[0];
+}
+
+function renderAssetTabs(assets) {
+  const tabs = el("div", "asset-tabs");
+  tabs.setAttribute("role", "tablist");
+  for (const group of assetGroups) {
+    const count = assetCount(assets, group.type);
+    const button = el("button", `asset-tab ${state.assetTab === group.type ? "active" : ""}`);
+    button.type = "button";
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", String(state.assetTab === group.type));
+    button.append(el("span", "", group.title), el("strong", "", String(count)));
+    button.addEventListener("click", () => {
+      state.assetTab = group.type;
+      renderAssets(filteredProjects());
+    });
+    tabs.append(button);
+  }
+  return tabs;
+}
+
 function renderAssets(projects) {
   const assets = allAssets(projects);
   const list = document.querySelector("#capsule-list");
@@ -606,10 +634,11 @@ function renderAssets(projects) {
     return;
   }
 
+  const group = activeAssetGroup();
+  const visibleAssets = assets.filter((asset) => asset.type === group.type);
   list.replaceChildren(
-    ...assetGroups.map((group) =>
-      renderAssetSection(group, assets.filter((asset) => asset.type === group.type))
-    )
+    renderAssetTabs(assets),
+    renderAssetSection(group, visibleAssets)
   );
 }
 

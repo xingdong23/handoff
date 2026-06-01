@@ -686,10 +686,57 @@ tbody tr:last-child td {
 
 .asset-board {
   display: grid;
-  grid-template-columns: minmax(280px, 0.9fr) minmax(360px, 1.1fr);
   gap: 10px;
   padding: 10px;
-  align-items: start;
+}
+
+.asset-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.asset-tab {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #ffffff;
+  color: var(--muted);
+  font-weight: 800;
+}
+
+.asset-tab.active {
+  border-color: #bfdbfe;
+  background: #eff6ff;
+  color: var(--blue);
+  box-shadow: inset 0 -2px 0 var(--blue);
+}
+
+.asset-tab span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.asset-tab strong {
+  min-width: 24px;
+  height: 24px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: #334155;
+  font-size: 12px;
+}
+
+.asset-tab.active strong {
+  background: var(--blue);
+  color: #ffffff;
 }
 
 .asset-section {
@@ -698,10 +745,6 @@ tbody tr:last-child td {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #ffffff;
-}
-
-.capsule-section {
-  grid-column: 1 / -1;
 }
 
 .asset-section-header {
@@ -1156,14 +1199,6 @@ pre {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .asset-board {
-    grid-template-columns: 1fr;
-  }
-
-  .capsule-section {
-    grid-column: auto;
-  }
-
   .rail-item {
     min-height: 52px;
   }
@@ -1212,6 +1247,10 @@ pre {
   }
 
   .asset-card {
+    grid-template-columns: 1fr;
+  }
+
+  .asset-tabs {
     grid-template-columns: 1fr;
   }
 
