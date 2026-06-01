@@ -37,6 +37,7 @@ function normalizeStatus(value) {
 
 function statusLabel(value) {
   const labels = {
+    active: "活跃",
     approved: "已审核",
     available: "可用",
     draft: "草稿",
@@ -353,6 +354,7 @@ function assetTypeLabel(asset) {
   if (asset.type === "capsule") return "Capsule";
   if (asset.type === "knowledge") return "Knowledge";
   if (asset.type === "skill") return asset.assetType ? `Skill / ${asset.assetType}` : "Skill";
+  if (asset.type === "session") return "Session";
   return asset.type || "Asset";
 }
 
@@ -371,6 +373,7 @@ function assetImportTitle(asset) {
   if (asset.type === "capsule") return "接续完整会话";
   if (asset.type === "knowledge") return "导入项目知识";
   if (asset.type === "skill") return "导入团队 Skill";
+  if (asset.type === "session") return "导入活跃 Session";
   return "导入资产上下文";
 }
 
@@ -402,6 +405,24 @@ function assetImportText(asset) {
       payload.content || payload.markdown || asset.summary || ""
     ].join("\n");
   }
+  if (asset.type === "session") {
+    const messages = payload.recentMessages || [];
+    return [
+      `# Handoff Active Session Import: ${asset.title}`,
+      "",
+      `Session: ${payload.sessionId || asset.id}`,
+      `Source: ${asset.storage || ""}`,
+      `Updated: ${asset.updatedAt || ""}`,
+      "",
+      "请把以下内容作为当前 AI 对话的参考上下文：",
+      "",
+      asset.summary || "",
+      "",
+      "## Recent Messages",
+      "",
+      ...(messages.length ? messages.map((message) => `- ${message.role}: ${message.text}`) : ["- 暂无最近消息摘要。"])
+    ].join("\n");
+  }
   return asset.summary || "";
 }
 
@@ -409,6 +430,7 @@ function assetFiles(asset) {
   const payload = asset.payload || {};
   if (asset.type === "capsule") return payload.contextPack?.files || [];
   if (asset.type === "knowledge") return payload.files || [];
+  if (asset.type === "session") return [asset.storage || payload.storage || ""].filter(Boolean);
   return [];
 }
 
@@ -481,10 +503,22 @@ function conversionButtons(asset) {
   if (asset.type === "knowledge") {
     addButton("转 Skill", "skill");
   }
+  if (asset.type === "session") {
+    addButton("转 Capsule", "capsule");
+    addButton("转知识", "knowledge");
+    addButton("转 Skill", "skill");
+  }
   return buttons;
 }
 
 const assetGroups = [
+  {
+    type: "capsule",
+    kicker: "Capsule",
+    title: "会话 Capsule",
+    emptyTitle: "暂无会话 Capsule",
+    emptyDetail: "当前筛选范围内没有会话资产。"
+  },
   {
     type: "knowledge",
     kicker: "Knowledge",
@@ -500,11 +534,11 @@ const assetGroups = [
     emptyDetail: "当前筛选范围内没有 Skill 资产。"
   },
   {
-    type: "capsule",
-    kicker: "Capsule",
-    title: "会话 Capsule",
-    emptyTitle: "暂无会话 Capsule",
-    emptyDetail: "当前筛选范围内没有会话资产。"
+    type: "session",
+    kicker: "Session",
+    title: "24h 活跃 Session",
+    emptyTitle: "暂无活跃 Session",
+    emptyDetail: "最近 24 小时内没有发现 Claude Code 会话。"
   }
 ];
 
@@ -512,6 +546,7 @@ function assetMetaItems(asset) {
   const items = [asset.projectName, asset.scope || "project"];
   if (asset.source?.type || asset.source?.app) items.push(asset.source.type || asset.source.app);
   if (asset.type === "skill" && asset.assetType) items.push(asset.assetType);
+  if (asset.type === "session" && asset.payload?.messageCount) items.push(`${asset.payload.messageCount} messages`);
   if (asset.type === "capsule") {
     const repo = gitRequirementRepo(asset.payload || {});
     if (repo?.branch) items.push(repo.branch);
@@ -526,6 +561,10 @@ function assetMetaItems(asset) {
 function assetProgress(asset) {
   const cell = el("div", "asset-progress-cell");
   if (asset.type !== "capsule") {
+    if (asset.type === "session") {
+      cell.append(el("span", "dash", "24h"));
+      return cell;
+    }
     cell.append(el("span", "dash", "-"));
     return cell;
   }
@@ -565,6 +604,10 @@ function assetActions(asset) {
     }
   });
   actions.append(importButton, shareButton, ...conversionButtons(asset));
+  if (asset.type === "session") {
+    actions.replaceChildren(importButton, ...conversionButtons(asset));
+    return actions;
+  }
   if (asset.type === "capsule") {
     const attachButton = rowAction("接续");
     const deleteButton = rowAction("删除", "danger");

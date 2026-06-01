@@ -3,6 +3,14 @@ import { inferGitLabConfig } from "./gitlab.js";
 import { ensureWorkspace, listCapsulesForProject, listProjects, listRequirementCapsules, listSkillAssets, loadGitLabStateForProject } from "./store.js";
 import { computeAttention } from "./reminders.js";
 import { listAssets } from "./assets.js";
+import { listActiveSessions } from "./active-sessions.js";
+import { slugify } from "./utils.js";
+
+function sameOrInside(parent, child) {
+  if (!parent || !child) return false;
+  const root = parent.endsWith("/") ? parent : `${parent}/`;
+  return child === parent || child.startsWith(root);
+}
 
 function summarizeProject(project) {
   const requirements = listRequirementCapsules(project.root);
@@ -61,9 +69,96 @@ function summarizeProject(project) {
   };
 }
 
-export function getDashboard(baseDir = process.cwd()) {
+function emptySessionProject(session) {
+  const name = session.project?.name || "Claude Code";
+  const root = session.project?.root || "";
+  return {
+    id: `session-${slugify(name)}`,
+    name,
+    root,
+    gitlabConfig: {
+      baseUrl: "https://gitlab.com",
+      projectId: "",
+      detected: null,
+      tokenConfigured: false
+    },
+    metrics: {
+      requirements: 0,
+      assets: 0,
+      skillAssets: 0,
+      capsules: 0,
+      activeCapsules: 0,
+      activeSessions: 0,
+      openMrs: 0,
+      failedPipelines: 0,
+      dirtyFiles: 0,
+      attention: 0
+    },
+    requirements: [],
+    assets: [],
+    skillAssets: [],
+    capsules: [],
+    git: {
+      branch: "",
+      upstream: "",
+      dirtyFiles: [],
+      ahead: 0,
+      behind: 0
+    },
+    gitlab: {
+      mergeRequests: [],
+      pipelines: [],
+      config: {
+        baseUrl: "https://gitlab.com",
+        projectId: "",
+        detected: null
+      },
+      currentBranch: "",
+      activeMergeRequests: []
+    },
+    attention: []
+  };
+}
+
+function projectForSession(projects, session) {
+  const root = session.project?.root || "";
+  if (!root) return null;
+  return projects
+    .filter((project) => sameOrInside(project.root, root))
+    .sort((a, b) => b.root.length - a.root.length)[0] || null;
+}
+
+function attachActiveSessions(projects, baseDir, options = {}) {
+  const sessions = listActiveSessions(baseDir, options);
+  if (!sessions.length) return projects;
+
+  const bySessionRoot = new Map();
+  const next = [...projects];
+  for (const session of sessions) {
+    let project = projectForSession(next, session);
+    if (!project) {
+      const key = session.project?.root || session.project?.name || session.id;
+      project = bySessionRoot.get(key);
+      if (!project) {
+        project = emptySessionProject(session);
+        bySessionRoot.set(key, project);
+        next.push(project);
+      }
+    }
+    project.assets = [session, ...(project.assets || [])];
+    project.metrics.assets += 1;
+    project.metrics.activeSessions = (project.metrics.activeSessions || 0) + 1;
+  }
+  return next;
+}
+
+export function getDashboard(baseDir = process.cwd(), options = {}) {
   if (!listProjects().length) ensureWorkspace(baseDir);
-  const projects = listProjects().map((project) => summarizeProject(project));
+  const projects = attachActiveSessions(
+    listProjects().map((project) => summarizeProject(project)),
+    baseDir,
+    options.activeSessions || {}
+  );
   const totals = projects.reduce(
     (acc, item) => {
       acc.projects += 1;
@@ -72,6 +167,7 @@ export function getDashboard(baseDir = process.cwd()) {
       acc.skillAssets += item.metrics.skillAssets;
       acc.capsules += item.metrics.capsules;
       acc.activeCapsules += item.metrics.activeCapsules;
+      acc.activeSessions += item.metrics.activeSessions || 0;
       acc.openMrs += item.metrics.openMrs;
       acc.failedPipelines += item.metrics.failedPipelines;
       acc.attention += item.metrics.attention;
@@ -85,6 +181,7 @@ export function getDashboard(baseDir = process.cwd()) {
       skillAssets: 0,
       capsules: 0,
       activeCapsules: 0,
+      activeSessions: 0,
       openMrs: 0,
       failedPipelines: 0,
       attention: 0,

@@ -29,6 +29,9 @@ import {
   listAssets,
   readAsset
 } from "../src/core/assets.js";
+import { listActiveSessions } from "../src/core/active-sessions.js";
+
+process.env.HANDOFF_CLAUDE_HOME = mkdtempSync(join(tmpdir(), "handoff-empty-claude-"));
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -458,4 +461,62 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
   assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
   assert.equal(getDashboard(cwd).totals.assets, 7);
+});
+
+test("reads 24h Claude Code sessions as dashboard assets", () => {
+  const root = mkdtempSync(join(tmpdir(), "handoff-session-"));
+  const cwd = join(root, "repo");
+  const claudeHome = join(root, ".claude");
+  const sessionDir = join(claudeHome, "projects", "-tmp-handoff-session-repo");
+  mkdirSync(cwd, { recursive: true });
+  mkdirSync(sessionDir, { recursive: true });
+  process.env.HANDOFF_DB = join(root, "handoff.sqlite");
+  process.env.HANDOFF_CLAUDE_HOME = claudeHome;
+
+  writeFileSync(
+    join(sessionDir, "active-session.jsonl"),
+    [
+      JSON.stringify({
+        type: "user",
+        message: { role: "user", content: "分析工单过滤异常并给出修复方案" },
+        timestamp: "2026-06-01T08:00:00.000Z",
+        cwd,
+        sessionId: "active-session"
+      }),
+      JSON.stringify({
+        type: "assistant",
+        message: { role: "assistant", content: [{ type: "text", text: "定位到 query_super_ticket_list 缺少 vid 过滤。" }] },
+        timestamp: "2026-06-01T08:03:00.000Z",
+        cwd,
+        sessionId: "active-session"
+      })
+    ].join("\n"),
+    "utf8"
+  );
+  writeFileSync(
+    join(sessionDir, "old-session.jsonl"),
+    `${JSON.stringify({
+      type: "user",
+      message: { role: "user", content: "超过一天的会话" },
+      timestamp: "2026-05-30T08:00:00.000Z",
+      cwd,
+      sessionId: "old-session"
+    })}\n`,
+    "utf8"
+  );
+
+  const sessions = listActiveSessions(cwd, { claudeHome, now: "2026-06-01T09:00:00.000Z" });
+  assert.equal(sessions.length, 1);
+  assert.equal(sessions[0].type, "session");
+  assert.match(sessions[0].summary, /query_super_ticket_list/);
+
+  const dashboard = getDashboard(cwd, { activeSessions: { claudeHome, now: "2026-06-01T09:00:00.000Z" } });
+  assert.equal(dashboard.totals.activeSessions, 1);
+  assert.ok(dashboard.projects[0].assets.some((asset) => asset.type === "session"));
+  assert.match(importAssetContext(cwd, sessions[0].id), /Handoff Active Session Import/);
+
+  const converted = convertAsset(cwd, sessions[0].id, "knowledge");
+  assert.equal(converted.source.type, "session");
+  assert.equal(converted.target.type, "knowledge");
+  assert.equal(converted.capsule.source.sessionId, "active-session");
 });

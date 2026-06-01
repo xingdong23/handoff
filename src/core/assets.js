@@ -1,4 +1,5 @@
 import { createCapsule } from "./capsule.js";
+import { readActiveSession, sessionImportText } from "./active-sessions.js";
 import { createKnowledgeShare, createShare } from "./share.js";
 import {
   formatKnowledgeMarkdown,
@@ -80,8 +81,13 @@ function skillAsset(asset) {
   };
 }
 
+function sessionAsset(session) {
+  return session || null;
+}
+
 export function assetFromPayload(payload) {
   if (!payload) return null;
+  if (payload.type === "session" && payload.payload?.sessionId) return sessionAsset(payload);
   if (payload.contextPack) return capsuleAsset(payload);
   if (payload.capsuleId && payload.quality) return knowledgeAsset(payload);
   if (payload.content || payload.assetType || payload.type) return skillAsset(payload);
@@ -112,9 +118,11 @@ export function readAsset(cwd = process.cwd(), ref) {
   if (value.startsWith("cap_") || value.includes("#capsules/")) return capsuleAsset(readCapsule(cwd, value));
   if (value.startsWith("kc_") || value.includes("#knowledge/")) return knowledgeAsset(readKnowledgeCapsule(cwd, value));
   if (value.startsWith("sk_") || value.includes("#skill-assets/")) return skillAsset(readSkillAsset(cwd, value));
+  if (value.startsWith("session_")) return sessionAsset(readActiveSession(cwd, value));
   return capsuleAsset(readCapsule(cwd, value)) ||
     knowledgeAsset(readKnowledgeCapsule(cwd, value)) ||
-    skillAsset(readSkillAsset(cwd, value));
+    skillAsset(readSkillAsset(cwd, value)) ||
+    sessionAsset(readActiveSession(cwd, value));
 }
 
 function capsuleImportText(capsule) {
@@ -146,6 +154,7 @@ export function importAssetContext(cwd = process.cwd(), refOrShare) {
   if (asset.type === "capsule") return capsuleImportText(asset.payload);
   if (asset.type === "knowledge") return knowledgeImportText(asset.payload);
   if (asset.type === "skill") return importSkillAsset(cwd, asset.payload);
+  if (asset.type === "session") return sessionImportText(asset);
   return null;
 }
 
@@ -179,10 +188,71 @@ export function createAssetShare(cwd = process.cwd(), ref, options = {}) {
   throw new Error(`Unsupported asset type: ${asset.type}`);
 }
 
+function createCapsuleFromSession(session, options = {}) {
+  const root = session.project?.root || process.cwd();
+  const recentMessages = session.payload?.recentMessages || [];
+  const structuredInput = {
+    summary: options.summary || session.summary || "",
+    status: "in_progress",
+    progressPercent: 0,
+    facts: recentMessages.slice(-6).map((message) => `${message.role}: ${message.text}`),
+    decisions: [],
+    commands: [],
+    nextActions: ["根据当前会话继续处理。"]
+  };
+  return createCapsule({
+    cwd: root,
+    title: options.title || session.title,
+    input: JSON.stringify(structuredInput),
+    source: "claude-code",
+    chatName: session.project?.name || "Claude Code",
+    sessionId: session.payload?.sessionId || session.id,
+    summary: options.summary || session.summary
+  }).capsule;
+}
+
 export function convertAsset(cwd = process.cwd(), ref, targetType, options = {}) {
   const asset = readAsset(cwd, ref);
   if (!asset) throw new Error(`Asset not found: ${ref}`);
   const target = String(targetType || "").trim().toLowerCase();
+
+  if (asset.type === "session") {
+    const capsule = createCapsuleFromSession(asset, options);
+    if (target === "capsule") {
+      return {
+        source: asset,
+        target: capsuleAsset(capsule),
+        capsule
+      };
+    }
+    if (target === "knowledge") {
+      const knowledge = createKnowledgeCapsule(capsule.project?.root || cwd, capsule.id, {
+        title: options.title,
+        summary: options.summary,
+        topics: options.topics
+      });
+      return {
+        source: asset,
+        target: knowledgeAsset(knowledge),
+        capsule,
+        knowledge
+      };
+    }
+    if (target === "skill") {
+      const skill = createSkillAssetFromCapsule(capsule.project?.root || cwd, capsule.id, {
+        title: options.title,
+        summary: options.summary,
+        type: options.assetType || options.type || "skill",
+        status: options.status || "submitted"
+      });
+      return {
+        source: asset,
+        target: skillAsset(skill),
+        capsule,
+        skill
+      };
+    }
+  }
 
   if (asset.type === "capsule" && target === "knowledge") {
     const knowledge = createKnowledgeCapsule(cwd, asset.id, {
