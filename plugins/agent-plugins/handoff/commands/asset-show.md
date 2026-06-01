@@ -1,0 +1,1 @@
+../../../vertical-plugins/handoff-core/commands/handoff/asset-show.md

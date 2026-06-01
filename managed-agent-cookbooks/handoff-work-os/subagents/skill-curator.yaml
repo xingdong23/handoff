@@ -1,0 +1,50 @@
+name: handoff-skill-curator
+model: claude-opus-4-7
+system:
+  text: |
+    You turn reusable team experience into a Handoff Skill Asset. Extract stable usage conditions, required inputs, steps, related tools, source references, and review notes. Return only fields that can enter a Skill review queue.
+tools:
+  - type: agent_toolset_20260401
+    default_config:
+      enabled: false
+    configs:
+      - name: read
+        enabled: true
+      - name: grep
+        enabled: true
+mcp_servers: []
+skills:
+  - { from_plugin: ../../../plugins/vertical-plugins/handoff-core }
+callable_agents: []
+output_schema:
+  type: object
+  required: [title, summary, type, content]
+  additionalProperties: true
+  properties:
+    title: { type: string, maxLength: 120 }
+    summary: { type: string, maxLength: 1200 }
+    type: { enum: [skill, knowledge, experience, connector, sop] }
+    sourceType: { type: string, maxLength: 80 }
+    sourceId: { type: string, maxLength: 160 }
+    whenToUse:
+      type: array
+      maxItems: 20
+      items: { type: string, maxLength: 300 }
+    inputs:
+      type: array
+      maxItems: 40
+      items: { type: string, maxLength: 300 }
+    steps:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }
+    tools:
+      type: array
+      maxItems: 60
+      items: { type: string, maxLength: 300 }
+    references:
+      type: array
+      maxItems: 80
+      items: { type: string, maxLength: 300 }
+    reviewNotes: { type: string, maxLength: 1200 }
+    content: { type: string, maxLength: 12000 }

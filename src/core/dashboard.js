@@ -1,10 +1,13 @@
 import { getGitSnapshot } from "./git.js";
 import { inferGitLabConfig } from "./gitlab.js";
-import { ensureWorkspace, listCapsulesForProject, listProjects, listRequirementCapsules, loadGitLabStateForProject } from "./store.js";
+import { ensureWorkspace, listCapsulesForProject, listProjects, listRequirementCapsules, listSkillAssets, loadGitLabStateForProject } from "./store.js";
 import { computeAttention } from "./reminders.js";
+import { listAssets } from "./assets.js";
 
 function summarizeProject(project) {
   const requirements = listRequirementCapsules(project.root);
+  const skillAssets = listSkillAssets(project.root);
+  const assets = listAssets(project.root);
   const capsules = listCapsulesForProject(project.id);
   const git = getGitSnapshot(project.root);
   const gitlab = loadGitLabStateForProject(project.id);
@@ -29,6 +32,8 @@ function summarizeProject(project) {
     },
     metrics: {
       requirements: requirements.length,
+      assets: assets.length,
+      skillAssets: skillAssets.length,
       capsules: capsules.length,
       activeCapsules,
       openMrs,
@@ -37,6 +42,8 @@ function summarizeProject(project) {
       attention: attention.length
     },
     requirements,
+    assets,
+    skillAssets,
     capsules,
     git,
     gitlab: {
@@ -61,6 +68,8 @@ export function getDashboard(baseDir = process.cwd()) {
     (acc, item) => {
       acc.projects += 1;
       acc.requirements += item.metrics.requirements;
+      acc.assets += item.metrics.assets;
+      acc.skillAssets += item.metrics.skillAssets;
       acc.capsules += item.metrics.capsules;
       acc.activeCapsules += item.metrics.activeCapsules;
       acc.openMrs += item.metrics.openMrs;
@@ -72,6 +81,8 @@ export function getDashboard(baseDir = process.cwd()) {
     {
       projects: 0,
       requirements: 0,
+      assets: 0,
+      skillAssets: 0,
       capsules: 0,
       activeCapsules: 0,
       openMrs: 0,

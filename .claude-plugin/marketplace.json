@@ -3,31 +3,31 @@
   "owner": {
     "name": "Handoff Contributors"
   },
-  "description": "Claude Code plugins for AI chat capsule capture, sharing, recovery, Git, GitLab, and project dashboards.",
+  "description": "Claude Code plugins for AI chat capsule capture, unified AI assets, Skill Asset review, sharing, recovery, Git, GitLab, and project dashboards.",
   "plugins": [
     {
       "name": "handoff-core",
       "displayName": "Handoff Core",
       "source": "./plugins/vertical-plugins/handoff-core",
-      "description": "Core skills and slash commands for AI chat capsules, recovery prompts, scoped Git status, and GitLab delivery tracking.",
+      "description": "Core skills and slash commands for AI chat capsules, unified AI assets, Skill Assets, recovery prompts, scoped Git status, and GitLab delivery tracking.",
       "version": "0.1.0",
       "author": {
         "name": "Handoff Contributors"
       },
       "category": "developer-tools",
-      "tags": ["ai", "handoff", "skills", "gitlab"]
+      "tags": ["ai", "handoff", "skills", "gitlab", "knowledge"]
     },
     {
       "name": "handoff",
       "displayName": "Handoff Work OS",
       "source": "./plugins/agent-plugins/handoff",
-      "description": "Capture, share, recover, and track AI chat capsules across projects with a shared local SQLite dashboard.",
+      "description": "Capture, share, import unified AI assets, review Skill Assets, and track AI chat capsules across projects with a shared local SQLite dashboard.",
       "version": "0.1.0",
       "author": {
         "name": "Handoff Contributors"
       },
       "category": "developer-tools",
-      "tags": ["ai", "handoff", "claude-code", "gitlab", "dashboard"]
+      "tags": ["ai", "handoff", "claude-code", "gitlab", "dashboard", "skills"]
     }
   ]
 }

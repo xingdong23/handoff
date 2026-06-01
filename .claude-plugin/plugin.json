@@ -1,7 +1,7 @@
 {
   "name": "handoff",
   "version": "0.1.0",
-  "description": "Capture, share, recover, and track AI chat capsules across projects with a shared local SQLite dashboard.",
+  "description": "Capture, share, import unified AI assets, review Skill Assets, and track AI chat capsules across projects with a shared local SQLite dashboard.",
   "commands": "./commands",
   "author": {
     "name": "Handoff Contributors"

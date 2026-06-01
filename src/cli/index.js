@@ -26,6 +26,26 @@ import {
   listRequirementCapsules,
   readRequirementCapsule
 } from "../core/requirement.js";
+import {
+  createSkillAssetFromCapsule,
+  createSkillAssetFromKnowledge,
+  createSkillAssetShare,
+  formatSkillAssetMarkdown,
+  importSkillAsset,
+  listSkillAssets,
+  readSkillAsset,
+  reviewSkillAsset,
+  submitSkillAsset
+} from "../core/skill-platform.js";
+import {
+  createAssetShare,
+  formatAssetMarkdown,
+  importAssetContext,
+  ingestKnowledgeAsset,
+  ingestSkillAsset,
+  listAssets,
+  readAsset
+} from "../core/assets.js";
 import { startServer } from "../server/index.js";
 
 const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), "../../package.json");
@@ -42,16 +62,28 @@ function usage() {
     "  handoff capture <name> --stdin",
     "  handoff share <capsule-id> --port 7349",
     "  handoff delete <capsule-id>",
-    "  handoff import <capsule-id-or-share-url>",
+    "  handoff import <asset-id-or-share-url>",
+    "  handoff asset list --json",
+    "  handoff asset show <asset-id>",
+    "  handoff asset share <asset-id>",
+    "  handoff asset import <asset-id-or-token-or-url>",
     "  handoff attach <capsule-id>",
     "  handoff requirement analyze <title> --from <file> --json",
     "  handoff requirement analyze <title> --stdin",
     "  handoff requirement list --json",
     "  handoff knowledge extract <capsule-id> --json",
+    "  handoff knowledge ingest <title> --from <file> --json",
     "  handoff knowledge share <knowledge-id>",
     "  handoff knowledge list --scope team --json",
     "  handoff memory build --scope team --min-score 70 --json",
     "  handoff memory latest --json",
+    "  handoff skill submit <title> --from <file> --type skill --json",
+    "  handoff skill ingest <title> --from <file> --json",
+    "  handoff skill from-capsule <capsule-id> --json",
+    "  handoff skill from-knowledge <knowledge-id> --json",
+    "  handoff skill review <asset-id> --approve --reviewer <name>",
+    "  handoff skill share <asset-id>",
+    "  handoff skill import <asset-id-or-token-or-url>",
     "  handoff status --json",
     "  handoff open --port 7349 --workspace <dir>",
     "  handoff dashboard --port 7349 --workspace <dir>",
@@ -69,6 +101,12 @@ async function readStdin() {
   return Buffer.concat(chunks).toString("utf8");
 }
 
+async function readInput(args) {
+  if (args.from) return readFileSync(args.from, "utf8");
+  if (args.stdin) return readStdin();
+  return args.content || await readStdin();
+}
+
 async function loadRef(cwd, ref) {
   if (/^https?:\/\//.test(ref)) {
     const response = await fetch(ref);
@@ -79,6 +117,24 @@ async function loadRef(cwd, ref) {
   const share = readShare(cwd, ref);
   if (share?.capsule) return share.capsule;
   return readCapsule(cwd, ref);
+}
+
+function shareApiUrl(ref) {
+  const url = new URL(ref);
+  if (url.pathname.startsWith("/s/")) {
+    const token = url.pathname.split("/").pop() || "";
+    url.pathname = `/api/share/${encodeURIComponent(token)}`;
+  }
+  return url.toString();
+}
+
+async function loadSharePayload(cwd, ref) {
+  if (/^https?:\/\//.test(ref)) {
+    const response = await fetch(shareApiUrl(ref));
+    if (!response.ok) throw new Error(`Share fetch failed: ${response.status}`);
+    return response.json();
+  }
+  return readShare(cwd, ref);
 }
 
 function printJson(value) {
@@ -230,11 +286,12 @@ async function commandDelete(args) {
 
 async function commandImport(args) {
   const ref = args._[1];
-  if (!ref) throw new Error("Capsule id, token, or share API URL is required");
-  const capsule = await loadRef(process.cwd(), ref);
-  if (!capsule) throw new Error(`Capsule not found: ${ref}`);
-  if (args.json) return printJson(capsule);
-  process.stdout.write(`${capsule.contextPack?.recoveryPrompt || ""}\n`);
+  if (!ref) throw new Error("Asset id, token, or share API URL is required");
+  const share = await loadSharePayload(process.cwd(), ref);
+  const text = importAssetContext(process.cwd(), share || ref);
+  if (!text) throw new Error(`Asset not found: ${ref}`);
+  if (args.json) return printJson(share || readAsset(process.cwd(), ref));
+  process.stdout.write(`${text}\n`);
 }
 
 async function commandAttach(args) {
@@ -310,6 +367,21 @@ async function commandRequirement(args) {
 
 async function commandKnowledge(args) {
   const sub = args._[1];
+  if (sub === "ingest") {
+    const title = args._[2] || args.title || "";
+    const input = await readInput(args);
+    const bundle = ingestKnowledgeAsset(process.cwd(), input, {
+      title,
+      summary: args.summary,
+      topics: args.topics,
+      projectId: args.project,
+      source: args.source || (args.from ? "file" : "knowledge-ingest")
+    });
+    if (args.json) return printJson(bundle);
+    process.stdout.write(`${bundle.knowledge.id}\n${bundle.knowledge.storage}\n`);
+    return;
+  }
+
   if (sub === "extract") {
     const ref = args._[2];
     if (!ref) throw new Error("Capsule id is required");
@@ -359,7 +431,7 @@ async function commandKnowledge(args) {
     return;
   }
 
-  throw new Error("Supported knowledge commands: handoff knowledge extract <capsule-id>, handoff knowledge share <knowledge-id>, handoff knowledge list, handoff knowledge show <knowledge-id>");
+  throw new Error("Supported knowledge commands: handoff knowledge ingest <title>, handoff knowledge extract <capsule-id>, handoff knowledge share <knowledge-id>, handoff knowledge list, handoff knowledge show <knowledge-id>");
 }
 
 async function commandMemory(args) {
@@ -403,6 +475,199 @@ async function commandMemory(args) {
   }
 
   throw new Error("Supported memory commands: handoff memory build, handoff memory list, handoff memory latest, handoff memory show <memory-id>");
+}
+
+async function commandSkill(args) {
+  const sub = args._[1];
+  if (sub === "ingest") {
+    const title = args._[2] || args.title || "";
+    const input = await readInput(args);
+    const bundle = ingestSkillAsset(process.cwd(), input, {
+      title,
+      summary: args.summary,
+      topics: args.topics,
+      type: args.type || "skill",
+      status: args.draft ? "draft" : args.status || "submitted",
+      projectId: args.project,
+      source: args.source || (args.from ? "file" : "skill-ingest")
+    });
+    if (args.json) return printJson(bundle);
+    process.stdout.write(`${bundle.skill.id}\n${bundle.skill.storage}\n`);
+    return;
+  }
+
+  if (sub === "submit") {
+    const title = args._[2] || args.title || "";
+    const input = await readInput(args);
+    const asset = submitSkillAsset(process.cwd(), input, {
+      title,
+      type: args.type || "skill",
+      summary: args.summary,
+      status: args.draft ? "draft" : args.status || "submitted",
+      sourceType: args.from ? "file" : "manual",
+      sourceId: args.from || ""
+    });
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${asset.id}\n${asset.storage}\n`);
+    return;
+  }
+
+  if (sub === "from-capsule") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Capsule id is required");
+    const asset = createSkillAssetFromCapsule(process.cwd(), ref, {
+      title: args.title,
+      summary: args.summary,
+      type: args.type || "skill",
+      status: args.draft ? "draft" : args.status || "submitted"
+    });
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${asset.id}\n${asset.storage}\n`);
+    return;
+  }
+
+  if (sub === "from-knowledge") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Knowledge capsule id is required");
+    const asset = createSkillAssetFromKnowledge(process.cwd(), ref, {
+      title: args.title,
+      summary: args.summary,
+      type: args.type || "knowledge",
+      status: args.draft ? "draft" : args.status || "submitted"
+    });
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${asset.id}\n${asset.storage}\n`);
+    return;
+  }
+
+  if (sub === "review") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Skill asset id is required");
+    const asset = reviewSkillAsset(process.cwd(), ref, {
+      approve: Boolean(args.approve) || (!args.reject && !args.status),
+      reject: Boolean(args.reject),
+      publish: Boolean(args.publish),
+      status: args.status,
+      reviewer: args.reviewer,
+      notes: args.notes || args["review-notes"]
+    });
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${asset.id}  ${asset.status}\n`);
+    return;
+  }
+
+  if (sub === "share") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Skill asset id is required");
+    const share = createSkillAssetShare(process.cwd(), ref, {
+      visibility: args.visibility || "team",
+      expiresInDays: args["expires-days"]
+    });
+    if (args.json) return printJson(share);
+    const port = args.port || process.env.HANDOFF_PORT || 7349;
+    process.stdout.write(`token=${share.token}\n`);
+    process.stdout.write(`url=http://localhost:${port}/s/${share.token}\n`);
+    process.stdout.write(`api=http://localhost:${port}/api/share/${share.token}\n`);
+    return;
+  }
+
+  if (sub === "import") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Skill asset id, token, or share URL is required");
+    const share = await loadSharePayload(process.cwd(), ref);
+    const text = share?.skill
+      ? importSkillAsset(process.cwd(), share)
+      : importSkillAsset(process.cwd(), ref);
+    if (!text) throw new Error(`Skill asset not found: ${ref}`);
+    if (args.json) return printJson(share?.skill || readSkillAsset(process.cwd(), ref));
+    process.stdout.write(`${text}\n`);
+    return;
+  }
+
+  if (sub === "show") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Skill asset id is required");
+    const asset = readSkillAsset(process.cwd(), ref);
+    if (!asset) throw new Error(`Skill asset not found: ${ref}`);
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${asset.markdown || formatSkillAssetMarkdown(asset)}\n`);
+    return;
+  }
+
+  if (sub === "list" || !sub) {
+    const items = listSkillAssets(process.cwd(), {
+      scope: args.scope || "project",
+      status: args.status,
+      type: args.type,
+      limit: args.limit
+    });
+    if (args.json) return printJson(items);
+    for (const item of items) {
+      process.stdout.write(`${item.id}  ${item.status}  ${item.type}  ${item.title}\n`);
+    }
+    return;
+  }
+
+  throw new Error("Supported skill commands: handoff skill ingest <title>, handoff skill submit <title>, handoff skill from-capsule <capsule-id>, handoff skill from-knowledge <knowledge-id>, handoff skill review <asset-id>, handoff skill share <asset-id>, handoff skill import <asset-id-or-token-or-url>, handoff skill list, handoff skill show <asset-id>");
+}
+
+async function commandAsset(args) {
+  const sub = args._[1];
+
+  if (sub === "list" || !sub) {
+    const items = listAssets(process.cwd(), {
+      scope: args.scope || "project",
+      type: args.type,
+      assetType: args["asset-type"],
+      status: args.status,
+      limit: args.limit
+    });
+    if (args.json) return printJson(items);
+    for (const item of items) {
+      const detail = item.assetType ? `${item.type}:${item.assetType}` : item.type;
+      process.stdout.write(`${item.id}  ${detail}  ${item.scope}  ${item.status}  ${item.title}\n`);
+    }
+    return;
+  }
+
+  if (sub === "show") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Asset id is required");
+    const asset = readAsset(process.cwd(), ref);
+    if (!asset) throw new Error(`Asset not found: ${ref}`);
+    if (args.json) return printJson(asset);
+    process.stdout.write(`${formatAssetMarkdown(asset)}\n`);
+    return;
+  }
+
+  if (sub === "share") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Asset id is required");
+    const share = createAssetShare(process.cwd(), ref, {
+      visibility: args.visibility || "team",
+      expiresInDays: args["expires-days"],
+      force: Boolean(args.force)
+    });
+    if (args.json) return printJson(share);
+    const port = args.port || process.env.HANDOFF_PORT || 7349;
+    process.stdout.write(`token=${share.token}\n`);
+    process.stdout.write(`url=http://localhost:${port}/s/${share.token}\n`);
+    process.stdout.write(`api=http://localhost:${port}/api/share/${share.token}\n`);
+    return;
+  }
+
+  if (sub === "import") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Asset id, token, or share URL is required");
+    const share = await loadSharePayload(process.cwd(), ref);
+    const text = importAssetContext(process.cwd(), share || ref);
+    if (!text) throw new Error(`Asset not found: ${ref}`);
+    if (args.json) return printJson(share || readAsset(process.cwd(), ref));
+    process.stdout.write(`${text}\n`);
+    return;
+  }
+
+  throw new Error("Supported asset commands: handoff asset list, handoff asset show <asset-id>, handoff asset share <asset-id>, handoff asset import <asset-id-or-token-or-url>");
 }
 
 async function commandStatus(args) {
@@ -495,10 +760,12 @@ export async function runCli(argv) {
   if (command === "share") return commandShare(args);
   if (command === "delete" || command === "rm") return commandDelete(args);
   if (command === "import") return commandImport(args);
+  if (command === "asset") return commandAsset(args);
   if (command === "attach") return commandAttach(args);
   if (command === "requirement") return commandRequirement(args);
   if (command === "knowledge") return commandKnowledge(args);
   if (command === "memory") return commandMemory(args);
+  if (command === "skill") return commandSkill(args);
   if (command === "status") return commandStatus(args);
   if (command === "open") return commandOpen(args);
   if (command === "dashboard") return commandDashboard(args);

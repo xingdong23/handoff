@@ -4,6 +4,8 @@ import { extname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createCapsule } from "../core/capsule.js";
 import { createKnowledgeShare, createShare } from "../core/share.js";
+import { createSkillAssetShare } from "../core/skill-platform.js";
+import { createAssetShare, listAssets, readAsset } from "../core/assets.js";
 import { getDashboard } from "../core/dashboard.js";
 import { inferGitLabConfig, scanGitLab } from "../core/gitlab.js";
 import { deleteCapsule, getProject, gitLabTokenConfigured, listProjects, readCapsule, readShare, saveGitLabToken, updateProjectGitLab } from "../core/store.js";
@@ -51,11 +53,18 @@ function escapeHtml(value) {
 }
 
 function sharePage(share) {
-  const item = share.knowledge || share.capsule || {};
-  const body = share.knowledge
-    ? share.knowledge.markdown || share.knowledge.summary || ""
-    : share.capsule?.contextPack?.recoveryPrompt || "";
-  const eyebrow = share.knowledge ? "Handoff Knowledge Capsule" : "Handoff Share Pack";
+  const item = share.skill || share.knowledge || share.capsule || {};
+  const body = share.skill
+    ? share.skill.markdown || share.skill.content || share.skill.summary || ""
+    : share.knowledge
+      ? share.knowledge.markdown || share.knowledge.summary || ""
+      : share.capsule?.contextPack?.recoveryPrompt || "";
+  const eyebrow = share.skill
+    ? "Handoff Skill Asset"
+    : share.knowledge ? "Handoff Knowledge Capsule" : "Handoff Share Pack";
+  const sectionTitle = share.skill
+    ? "Skill Asset"
+    : share.knowledge ? "Knowledge Capsule" : "Recovery Prompt";
   return [
     "<!doctype html>",
     "<html lang=\"zh-CN\">",
@@ -73,7 +82,7 @@ function sharePage(share) {
     `<p>${escapeHtml(item.summary)}</p>`,
     "</section>",
     "<section class=\"panel\">",
-    `<h2>${share.knowledge ? "Knowledge Capsule" : "Recovery Prompt"}</h2>`,
+    `<h2>${sectionTitle}</h2>`,
     `<pre>${escapeHtml(body)}</pre>`,
     "</section>",
     "</main>",
@@ -141,6 +150,22 @@ export function createHandoffServer({ workspace }) {
         return capsule ? sendJson(res, capsule) : sendJson(res, { error: "not found" }, 404);
       }
 
+      if (req.method === "GET" && pathname === "/api/assets") {
+        return sendJson(res, listAssets(workspace, {
+          scope: url.searchParams.get("scope") || "project",
+          type: url.searchParams.get("type") || "",
+          assetType: url.searchParams.get("assetType") || "",
+          status: url.searchParams.get("status") || "",
+          limit: url.searchParams.get("limit") || 100
+        }));
+      }
+
+      if (req.method === "GET" && pathname.startsWith("/api/assets/")) {
+        const id = decodeURIComponent(pathname.split("/").pop() || "");
+        const asset = readAsset(workspace, id);
+        return asset ? sendJson(res, asset) : sendJson(res, { error: "not found" }, 404);
+      }
+
       if (req.method === "DELETE" && pathname.startsWith("/api/capsules/")) {
         const id = decodeURIComponent(pathname.split("/").pop() || "");
         const result = deleteCapsule(workspace, id);
@@ -169,7 +194,11 @@ export function createHandoffServer({ workspace }) {
 
       if (req.method === "POST" && pathname === "/api/share") {
         const body = await readBody(req);
-        const share = body.knowledgeId
+        const share = body.assetId
+          ? createAssetShare(workspace, body.assetId, body)
+          : body.skillId
+          ? createSkillAssetShare(workspace, body.skillId, body)
+          : body.knowledgeId
           ? createKnowledgeShare(workspace, body.knowledgeId, body)
           : createShare(workspace, body.capsuleId, body);
         return sendJson(res, share, 201);

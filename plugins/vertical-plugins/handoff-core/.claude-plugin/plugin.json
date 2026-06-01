@@ -1,7 +1,7 @@
 {
   "name": "handoff-core",
   "version": "0.1.0",
-  "description": "Core Handoff skills and slash commands for AI chat capsules, recovery prompts, Git state, GitLab delivery tracking, and dashboard operation.",
+  "description": "Core Handoff skills and slash commands for AI chat capsules, unified AI assets, Skill Assets, recovery prompts, Git state, GitLab delivery tracking, and dashboard operation.",
   "commands": "./commands",
   "author": {
     "name": "Handoff Contributors"

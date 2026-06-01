@@ -11,6 +11,23 @@ import { computeAttention } from "../src/core/reminders.js";
 import { getDashboard } from "../src/core/dashboard.js";
 import { buildTeamMemory, createKnowledgeCapsule, listTeamMemorySnapshots, readKnowledgeCapsule } from "../src/core/knowledge.js";
 import { analyzeRequirement, readRequirementCapsule } from "../src/core/requirement.js";
+import {
+  createSkillAssetFromCapsule,
+  createSkillAssetFromKnowledge,
+  createSkillAssetShare,
+  importSkillAsset,
+  readSkillAsset,
+  reviewSkillAsset,
+  submitSkillAsset
+} from "../src/core/skill-platform.js";
+import {
+  createAssetShare,
+  importAssetContext,
+  ingestKnowledgeAsset,
+  ingestSkillAsset,
+  listAssets,
+  readAsset
+} from "../src/core/assets.js";
 
 function git(cwd, args) {
   return execFileSync("git", args, {
@@ -339,4 +356,97 @@ test("analyzes a requirement document into a requirement capsule", () => {
   assert.equal(requirement.acceptanceCriteria.length, 2);
   assert.match(requirement.markdown, /Acceptance Criteria/);
   assert.equal(readRequirementCapsule(cwd, requirement.id).openQuestions[0], "Whether rollout needs a feature switch");
+});
+
+test("publishes skill assets after review", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+  const { capsule } = createCapsule({
+    cwd,
+    title: "payment retry operator skill",
+    input: JSON.stringify({
+      summary: "Payment retry handling uses bounded exponential backoff and replay tracing.",
+      facts: ["RetryScheduler owns retry dispatch"],
+      decisions: ["Use bounded exponential backoff"],
+      files: ["src/RetryScheduler.java"],
+      commands: ["npm test"],
+      nextActions: ["Check replay trace before changing retry windows"]
+    }),
+    source: "test"
+  });
+  const knowledge = createKnowledgeCapsule(cwd, capsule.id);
+
+  const fromKnowledge = createSkillAssetFromKnowledge(cwd, knowledge.id);
+  const fromCapsule = createSkillAssetFromCapsule(cwd, capsule.id, { title: "retry review SOP" });
+  const manual = submitSkillAsset(cwd, "# Oncall replay check\n\n1. Inspect trace id.\n2. Compare retry window.", {
+    title: "oncall replay check",
+    type: "experience"
+  });
+
+  assert.match(fromKnowledge.id, /^sk_/);
+  assert.equal(fromKnowledge.source.id, knowledge.id);
+  assert.equal(fromCapsule.source.id, capsule.id);
+  assert.equal(manual.type, "experience");
+  assert.equal(readSkillAsset(cwd, fromKnowledge.id).status, "submitted");
+  assert.throws(() => createSkillAssetShare(cwd, fromKnowledge.id), /approved before sharing/);
+
+  const reviewed = reviewSkillAsset(cwd, fromKnowledge.id, {
+    approve: true,
+    reviewer: "curator",
+    notes: "Reusable retry procedure"
+  });
+  assert.equal(reviewed.status, "approved");
+  assert.equal(reviewed.reviewer, "curator");
+
+  const share = createSkillAssetShare(cwd, fromKnowledge.id, { visibility: "team" });
+  assert.equal(share.artifactType, "skill_asset");
+  assert.equal(share.artifactId, fromKnowledge.id);
+  assert.equal(readShare(cwd, share.token).skill.id, fromKnowledge.id);
+  assert.match(importSkillAsset(cwd, share), /bounded exponential backoff/);
+  assert.equal(getDashboard(cwd).totals.skillAssets, 3);
+});
+
+test("manages capsules, knowledge, and skills through unified assets", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+
+  const knowledgeBundle = ingestKnowledgeAsset(
+    cwd,
+    JSON.stringify({
+      summary: "Callback timeout knowledge should be reusable inside the project.",
+      facts: ["Connection pool wait time drives callback timeout"],
+      decisions: ["Keep retry limit below three attempts"],
+      commands: ["npm test"],
+      nextActions: ["Watch timeout metric"]
+    }),
+    { title: "callback timeout knowledge" }
+  );
+  const skillBundle = ingestSkillAsset(
+    cwd,
+    JSON.stringify({
+      summary: "Use the trace id to inspect callback retry behavior.",
+      facts: ["Trace id links callback, retry, and replay records"],
+      decisions: ["Inspect trace before changing retry windows"],
+      commands: ["npm test"],
+      nextActions: ["Open callback trace"]
+    }),
+    { title: "callback retry trace skill" }
+  );
+
+  const assets = listAssets(cwd);
+  assert.ok(assets.some((asset) => asset.type === "capsule"));
+  assert.ok(assets.some((asset) => asset.type === "knowledge"));
+  assert.ok(assets.some((asset) => asset.type === "skill"));
+  assert.equal(readAsset(cwd, knowledgeBundle.knowledge.id).type, "knowledge");
+  assert.match(importAssetContext(cwd, knowledgeBundle.knowledge.id), /Handoff Knowledge Import/);
+
+  const knowledgeShare = createAssetShare(cwd, knowledgeBundle.knowledge.id, { visibility: "team" });
+  assert.equal(readShare(cwd, knowledgeShare.token).knowledge.id, knowledgeBundle.knowledge.id);
+  assert.throws(() => createAssetShare(cwd, skillBundle.skill.id), /approved before sharing/);
+
+  reviewSkillAsset(cwd, skillBundle.skill.id, { approve: true, reviewer: "asset curator" });
+  const skillShare = createAssetShare(cwd, skillBundle.skill.id, { visibility: "team" });
+  assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
+  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
+  assert.equal(getDashboard(cwd).totals.assets, 5);
 });

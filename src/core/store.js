@@ -145,6 +145,34 @@ function migrate(db) {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS skill_assets (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      status TEXT NOT NULL,
+      source_type TEXT NOT NULL DEFAULT 'manual',
+      source_id TEXT NOT NULL DEFAULT '',
+      content_md TEXT NOT NULL,
+      asset_json TEXT NOT NULL,
+      reviewer TEXT NOT NULL DEFAULT '',
+      review_notes TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS asset_shares (
+      token TEXT PRIMARY KEY,
+      artifact_type TEXT NOT NULL,
+      artifact_id TEXT NOT NULL,
+      visibility TEXT NOT NULL,
+      expires_at TEXT,
+      ack INTEGER NOT NULL DEFAULT 0,
+      share_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
   `);
   ensureColumn(db, "projects", "gitlab_token", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "capsules", "conversation_key", "TEXT NOT NULL DEFAULT ''");
@@ -154,7 +182,10 @@ function migrate(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_requirement_capsules_project ON requirement_capsules(project_id, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_knowledge_capsules_capsule ON knowledge_capsules(project_id, capsule_id);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_team_memory_created ON team_memory_snapshots(created_at DESC);");
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '4')").run();
+  db.exec("CREATE INDEX IF NOT EXISTS idx_skill_assets_project_status ON skill_assets(project_id, status, updated_at DESC);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_skill_assets_status ON skill_assets(status, updated_at DESC);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_asset_shares_artifact ON asset_shares(artifact_type, artifact_id);");
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '5')").run();
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -268,6 +299,10 @@ function knowledgeStorageRef(id) {
 
 function memoryStorageRef(id) {
   return `sqlite:${dbPath()}#team-memory/${encodeURIComponent(id)}`;
+}
+
+function skillAssetStorageRef(id) {
+  return `sqlite:${dbPath()}#skill-assets/${encodeURIComponent(id)}`;
 }
 
 function capsuleConversationKey(capsule) {
@@ -553,6 +588,30 @@ function rowToTeamMemory(row) {
   };
 }
 
+function rowToSkillAsset(row) {
+  const asset = parseJson(row.asset_json, null) || {};
+  return {
+    ...asset,
+    id: row.id,
+    projectId: row.project_id,
+    type: row.type,
+    title: row.title,
+    summary: row.summary,
+    status: row.status,
+    source: {
+      ...(asset.source || {}),
+      type: row.source_type || asset.source?.type || "manual",
+      id: row.source_id || asset.source?.id || ""
+    },
+    content: row.content_md,
+    reviewer: row.reviewer,
+    reviewNotes: row.review_notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    storage: skillAssetStorageRef(row.id)
+  };
+}
+
 function knowledgeRefValue(ref) {
   const value = String(ref || "");
   const match = value.match(/#knowledge\/([^/?#]+)/);
@@ -568,6 +627,12 @@ function memoryRefValue(ref) {
 function requirementRefValue(ref) {
   const value = String(ref || "");
   const match = value.match(/#requirements\/([^/?#]+)/);
+  return match ? decodeURIComponent(match[1]) : value;
+}
+
+function skillAssetRefValue(ref) {
+  const value = String(ref || "");
+  const match = value.match(/#skill-assets\/([^/?#]+)/);
   return match ? decodeURIComponent(match[1]) : value;
 }
 
@@ -1046,6 +1111,141 @@ export function listTeamMemorySnapshots(options = {}) {
     .map(rowToTeamMemory);
 }
 
+export function saveSkillAsset(cwd, asset) {
+  const project = ensureProject(cwd);
+  const projectId = asset.projectId || asset.project?.id || project.id;
+  const now = nowIso();
+  const createdAt = asset.createdAt || now;
+  const updatedAt = asset.updatedAt || now;
+  const payload = {
+    ...asset,
+    projectId,
+    createdAt,
+    updatedAt
+  };
+  openDb().prepare(`
+    INSERT INTO skill_assets(
+      id, project_id, type, title, summary, status, source_type, source_id,
+      content_md, asset_json, reviewer, review_notes, created_at, updated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      project_id = excluded.project_id,
+      type = excluded.type,
+      title = excluded.title,
+      summary = excluded.summary,
+      status = excluded.status,
+      source_type = excluded.source_type,
+      source_id = excluded.source_id,
+      content_md = excluded.content_md,
+      asset_json = excluded.asset_json,
+      reviewer = excluded.reviewer,
+      review_notes = excluded.review_notes,
+      updated_at = excluded.updated_at
+  `).run(
+    payload.id,
+    projectId,
+    payload.type || "skill",
+    payload.title,
+    payload.summary || "",
+    payload.status || "draft",
+    payload.source?.type || payload.sourceType || "manual",
+    payload.source?.id || payload.sourceId || "",
+    payload.content || payload.markdown || "",
+    jsonText(payload),
+    payload.reviewer || "",
+    payload.reviewNotes || "",
+    createdAt,
+    updatedAt
+  );
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, projectId);
+  return skillAssetStorageRef(payload.id);
+}
+
+export function readSkillAsset(cwd = process.cwd(), ref) {
+  const value = skillAssetRefValue(ref);
+  if (!value) return null;
+  const project = ensureProject(cwd);
+  const row = openDb().prepare(`
+    SELECT * FROM skill_assets
+    WHERE project_id = ? AND (id = ? OR title = ?)
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(project.id, value, value) || openDb().prepare(`
+    SELECT * FROM skill_assets
+    WHERE id = ? OR title = ?
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(value, value);
+  return row ? rowToSkillAsset(row) : null;
+}
+
+export function listSkillAssets(cwd = process.cwd(), options = {}) {
+  const db = openDb();
+  const limit = Math.max(1, Math.min(Number(options.limit || 100), 500));
+  const clauses = [];
+  const params = [];
+  if (!(options.scope === "team" || options.allProjects)) {
+    const project = ensureProject(cwd);
+    clauses.push("project_id = ?");
+    params.push(project.id);
+  }
+  if (options.status) {
+    clauses.push("status = ?");
+    params.push(options.status);
+  }
+  if (options.type) {
+    clauses.push("type = ?");
+    params.push(options.type);
+  }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return db.prepare(`
+    SELECT * FROM skill_assets
+    ${where}
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `).all(...params, limit).map(rowToSkillAsset);
+}
+
+export function reviewSkillAsset(cwd = process.cwd(), ref, review = {}) {
+  const current = readSkillAsset(cwd, ref);
+  if (!current) return null;
+  const status = review.status || current.status || "submitted";
+  const updated = {
+    ...current,
+    status,
+    reviewer: review.reviewer || current.reviewer || "",
+    reviewNotes: review.notes || review.reviewNotes || current.reviewNotes || "",
+    updatedAt: nowIso()
+  };
+  updated.storage = saveSkillAsset(cwd, updated);
+  return updated;
+}
+
+export function saveAssetShare(cwd = process.cwd(), share) {
+  ensureProject(cwd);
+  openDb().prepare(`
+    INSERT INTO asset_shares(token, artifact_type, artifact_id, visibility, expires_at, ack, share_json, created_at)
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET
+      artifact_type = excluded.artifact_type,
+      artifact_id = excluded.artifact_id,
+      visibility = excluded.visibility,
+      expires_at = excluded.expires_at,
+      ack = excluded.ack,
+      share_json = excluded.share_json
+  `).run(
+    share.token,
+    share.artifactType,
+    share.artifactId,
+    share.visibility || "team",
+    share.expiresAt || null,
+    share.ack ? 1 : 0,
+    jsonText(share),
+    share.createdAt || nowIso()
+  );
+}
+
 export function saveShare(cwd, share) {
   ensureProject(cwd);
   const db = openDb();
@@ -1076,7 +1276,9 @@ export function saveShare(cwd, share) {
 export function readShare(cwd = process.cwd(), token) {
   ensureProject(cwd);
   const row = openDb().prepare("SELECT share_json FROM shares WHERE token = ?").get(token);
-  return row ? parseJson(row.share_json, null) : null;
+  if (row) return parseJson(row.share_json, null);
+  const assetRow = openDb().prepare("SELECT share_json FROM asset_shares WHERE token = ?").get(token);
+  return assetRow ? parseJson(assetRow.share_json, null) : null;
 }
 
 export function saveGitLabState(cwd, state) {

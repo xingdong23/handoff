@@ -7,6 +7,19 @@ description: Capture, import, attach, share, and track AI conversation assets wi
 
 Handoff turns an AI conversation into a reusable Capsule. A Capsule should contain a readable title, current state, progress, decisions, confirmed facts, related files, next actions, and the Git requirement status for the files that belong to the current demand.
 
+## Unified Assets
+
+Capsules, Knowledge Capsules, and Skill Assets are all Handoff assets. Use the unified asset commands when the exact type is already known by id or share URL.
+
+```bash
+handoff asset list
+handoff asset show "<asset-id>"
+handoff asset share "<asset-id>"
+handoff asset import "<asset-id-or-token-or-url>"
+```
+
+Use `handoff import "<asset-id-or-token-or-url>"` as the generic import command. It returns the right context for the asset type: recovery prompt for Capsule, project knowledge for Knowledge Capsule, and reusable procedure for Skill Asset.
+
 ## Requirement Capsule
 
 Use requirement analysis when a PRD, demand note, or meeting note should become structured project context before implementation starts.
@@ -74,6 +87,14 @@ handoff share "<capsule-id>"
 
 Use knowledge extraction when a high-value conversation should become reusable team knowledge.
 
+Create a Knowledge Capsule from raw text or a file:
+
+```bash
+handoff knowledge ingest "<short-readable-title>" --stdin
+```
+
+Extract from an existing Capsule:
+
 ```bash
 handoff knowledge extract "<capsule-id>"
 ```
@@ -96,6 +117,47 @@ handoff memory build --scope team
 
 Use `--scope project` when only the current project should be included.
 Use `--min-score 70` when only Knowledge Capsules with enough quality signals should be included.
+
+## Skill Platform
+
+Use Skill Platform when a reusable Skill, Knowledge Capsule, or expert experience should enter team review and become shareable.
+
+Submit a manual Skill Asset:
+
+```bash
+handoff skill submit "<short-readable-title>" --stdin
+```
+
+Create a Skill Asset from raw text or a file:
+
+```bash
+handoff skill ingest "<short-readable-title>" --stdin
+```
+
+Create a Skill Asset from an existing Capsule:
+
+```bash
+handoff skill from-capsule "<capsule-id>"
+```
+
+Create a Skill Asset from an existing Knowledge Capsule:
+
+```bash
+handoff skill from-knowledge "<knowledge-id>"
+```
+
+Approve and share it:
+
+```bash
+handoff skill review "<asset-id>" --approve
+handoff skill share "<asset-id>"
+```
+
+Import a Skill Asset into the current AI chat by id, token, share page URL, or API URL:
+
+```bash
+handoff skill import "<asset-id-or-token-or-url>"
+```
 
 ## Dashboard
 
