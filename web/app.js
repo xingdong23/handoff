@@ -3,7 +3,7 @@ const state = {
   selectedCapsule: null,
   query: "",
   project: "all",
-  assetTab: "knowledge",
+  assetTab: "capsule",
   sideOpen: false
 };
 
@@ -101,11 +101,11 @@ function gitRequirementText(requirement) {
   ].join("\n");
 }
 
-function metric({ label, value, detail, tone, iconName }) {
+function metric({ label, value, tone, iconName }) {
   const node = el("article", `metric ${tone}`);
   const top = el("div", "metric-top");
   top.append(icon(iconName), el("span", "", label));
-  node.append(top, el("strong", "", String(value)), el("small", "", detail));
+  node.append(top, el("strong", "", String(value)));
   return node;
 }
 
@@ -279,17 +279,15 @@ async function runSettingsAction(action) {
   }
 }
 
-function renderMetrics(totals) {
+function renderMetrics(totals, projects) {
   const root = document.querySelector("#overview");
+  const assets = allAssets(projects);
+  const pendingReview = assets.filter((asset) => ["submitted", "draft"].includes(normalizeStatus(asset.status))).length;
   root.replaceChildren(
-    metric({ label: "项目", value: totals.projects, detail: "已接入 Handoff", tone: "blue", iconName: "project" }),
-    metric({ label: "需求", value: totals.requirements || 0, detail: "Requirement", tone: "slate", iconName: "project" }),
-    metric({ label: "资产", value: totals.assets || 0, detail: "Capsule / Knowledge / Skill", tone: "green", iconName: "capsule" }),
-    metric({ label: "进行中", value: totals.activeCapsules, detail: "可继续处理", tone: "green", iconName: "active" }),
-    metric({ label: "Capsule", value: totals.capsules, detail: "会话资产", tone: "violet", iconName: "capsule" }),
-    metric({ label: "未合并 MR", value: totals.openMrs, detail: "GitLab 扫描", tone: "amber", iconName: "merge" }),
-    metric({ label: "CI 异常", value: totals.failedPipelines, detail: "需要处理", tone: "red", iconName: "ci" }),
-    metric({ label: "提醒", value: totals.attention, detail: "关注队列", tone: "slate", iconName: "bell" })
+    metric({ label: "项目", value: totals.projects, tone: "blue", iconName: "project" }),
+    metric({ label: "资产", value: totals.assets || 0, tone: "green", iconName: "capsule" }),
+    metric({ label: "进行中", value: totals.activeCapsules, tone: "blue", iconName: "active" }),
+    metric({ label: "待审核", value: pendingReview, tone: "amber", iconName: "review" })
   );
 }
 
@@ -355,6 +353,17 @@ function assetTypeLabel(asset) {
   if (asset.type === "knowledge") return "Knowledge";
   if (asset.type === "skill") return asset.assetType ? `Skill / ${asset.assetType}` : "Skill";
   return asset.type || "Asset";
+}
+
+function formatUpdated(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "-";
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mi = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}`;
 }
 
 function assetImportTitle(asset) {
@@ -436,7 +445,8 @@ async function convertAsset(asset, target) {
 function conversionButtons(asset) {
   const buttons = [];
   const addButton = (label, target) => {
-    const button = el("button", "mini-button", label);
+    const button = el("button", "row-action", label);
+    button.type = "button";
     button.addEventListener("click", async () => {
       try {
         button.disabled = true;
@@ -513,16 +523,27 @@ function assetMetaItems(asset) {
 }
 
 function assetProgress(asset) {
-  if (asset.type !== "capsule") return null;
+  const cell = el("div", "asset-progress-cell");
+  if (asset.type !== "capsule") {
+    cell.append(el("span", "dash", "-"));
+    return cell;
+  }
   const row = el("div", "asset-progress");
   row.append(progressBar(asset.payload?.progress?.percent || 0), el("span", "", `${percent(asset.payload?.progress?.percent)}%`));
-  return row;
+  cell.append(row);
+  return cell;
+}
+
+function rowAction(label, className = "") {
+  const button = el("button", `row-action ${className}`.trim(), label);
+  button.type = "button";
+  return button;
 }
 
 function assetActions(asset) {
   const actions = el("div", "asset-actions");
-  const importButton = el("button", "mini-button primary", "导入");
-  const shareButton = el("button", "mini-button", "分享");
+  const importButton = rowAction("导入", "primary");
+  const shareButton = rowAction("分享");
   importButton.addEventListener("click", () => openContextDialog({
     kicker: assetTypeLabel(asset),
     title: assetImportTitle(asset),
@@ -544,8 +565,8 @@ function assetActions(asset) {
   });
   actions.append(importButton, shareButton, ...conversionButtons(asset));
   if (asset.type === "capsule") {
-    const attachButton = el("button", "mini-button", "接续");
-    const deleteButton = el("button", "mini-button danger", "删除");
+    const attachButton = rowAction("接续");
+    const deleteButton = rowAction("删除", "danger");
     attachButton.addEventListener("click", () => openAttachDialog(asset.payload || {}));
     deleteButton.addEventListener("click", () => deleteCapsule(asset.payload || asset));
     actions.append(attachButton, deleteButton);
@@ -556,22 +577,35 @@ function assetActions(asset) {
   return actions;
 }
 
+function assetTags(asset) {
+  const tags = assetMetaItems(asset);
+  const visible = tags.slice(0, 2);
+  const rest = tags.length - visible.length;
+  const node = el("div", "asset-tags");
+  node.replaceChildren(...visible.map((item) => el("span", "", item)));
+  if (rest > 0) node.append(el("span", "", `+${rest}`));
+  return node;
+}
+
 function renderAssetCard(asset) {
-  const card = el("article", `asset-card ${asset.type}-asset`);
-  const main = el("div", "asset-card-main");
-  const header = el("div", "asset-card-header");
-  const title = el("strong", "", asset.title);
-  header.append(title, badge(asset.status || "available"));
-  const summary = el("p", "asset-summary", compact(asset.summary || "暂无摘要", 190));
-  const meta = el("div", "asset-meta-line");
-  meta.replaceChildren(...assetMetaItems(asset).map((item) => el("span", "", item)));
-  main.append(header, summary);
-  const progress = assetProgress(asset);
-  if (progress) main.append(progress);
-  main.append(meta);
-  card.append(main, assetActions(asset));
-  card.addEventListener("click", (event) => {
+  const row = el("article", `asset-row ${asset.type}-asset`);
+  const check = document.createElement("input");
+  check.type = "checkbox";
+  check.setAttribute("aria-label", `选择 ${asset.title}`);
+  const main = el("div", "asset-main");
+  main.append(el("strong", "", asset.title), el("p", "", compact(asset.summary || "暂无摘要", 120)));
+  row.append(
+    check,
+    main,
+    assetTags(asset),
+    badge(asset.status || "available"),
+    el("time", "asset-time", formatUpdated(asset.updatedAt || asset.createdAt)),
+    assetProgress(asset),
+    assetActions(asset)
+  );
+  row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
+    if (event.target.closest("input")) return;
     openContextDialog({
       kicker: assetTypeLabel(asset),
       title: assetImportTitle(asset),
@@ -579,22 +613,30 @@ function renderAssetCard(asset) {
       files: assetFiles(asset)
     });
   });
-  return card;
+  return row;
 }
 
 function renderAssetSection(group, assets) {
   const section = el("section", `asset-section ${group.type}-section`);
-  const header = el("div", "asset-section-header");
-  const title = el("div", "asset-section-title");
-  title.append(el("span", "section-kicker", group.kicker), el("h4", "", group.title));
-  header.append(title, el("span", "counter", `${assets.length} 个`));
+  const tableHeader = el("div", "asset-table-header");
+  tableHeader.append(
+    el("span", "", ""),
+    el("span", "", "名称与摘要"),
+    el("span", "", "标签"),
+    el("span", "", "审核状态"),
+    el("span", "", "最近更新"),
+    el("span", "", "进度"),
+    el("span", "", "操作")
+  );
   const list = el("div", "asset-section-list");
   list.replaceChildren(
     ...(assets.length
       ? assets.map(renderAssetCard)
       : [emptyState(group.emptyTitle, group.emptyDetail)])
   );
-  section.append(header, list);
+  const footer = el("div", "asset-section-footer");
+  footer.append(el("span", "", `共 ${assets.length} 条`));
+  section.append(tableHeader, list, footer);
   return section;
 }
 
@@ -636,7 +678,28 @@ function renderAssets(projects) {
 
   const group = activeAssetGroup();
   const visibleAssets = assets.filter((asset) => asset.type === group.type);
+  const assetHead = el("div", "asset-board-head");
+  const title = el("div");
+  title.append(el("span", "section-kicker", group.kicker), el("h3", "", group.title));
+  const tools = el("div", "asset-board-tools");
+  const newButton = el("button", "mini-button primary", "新建资产");
+  newButton.type = "button";
+  newButton.addEventListener("click", () => openContextDialog({
+    kicker: "Create",
+    title: "新建资产",
+    text: [
+      "可通过以下命令创建资产：",
+      "",
+      "/handoff:capture",
+      "/handoff:knowledge-ingest",
+      "/handoff:skill-ingest"
+    ].join("\n"),
+    files: []
+  }));
+  tools.append(newButton);
+  assetHead.append(title, tools);
   list.replaceChildren(
+    assetHead,
     renderAssetTabs(assets),
     renderAssetSection(group, visibleAssets)
   );
@@ -765,7 +828,7 @@ async function loadDashboard() {
 
 function renderAll() {
   const projects = filteredProjects();
-  renderMetrics(state.dashboard.totals);
+  renderMetrics(state.dashboard.totals, projects);
   renderSideRail(projects);
   renderAttention(projects);
   renderAssets(projects);
