@@ -1,5 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync, existsSync, readdirSync, statSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { mkdirSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 
 export function nowIso() {
@@ -29,38 +28,6 @@ export function randomToken(bytes = 16) {
 
 export function ensureDir(path) {
   mkdirSync(path, { recursive: true });
-}
-
-export function writeJson(path, value) {
-  ensureDir(dirname(path));
-  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
-}
-
-export function readJson(path, fallback = undefined) {
-  if (!existsSync(path)) return fallback;
-  try {
-    if (!statSync(path).isFile()) return fallback;
-    return JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return fallback;
-  }
-}
-
-export function writeText(path, value) {
-  ensureDir(dirname(path));
-  writeFileSync(path, value.endsWith("\n") ? value : `${value}\n`, "utf8");
-}
-
-export function readText(path, fallback = "") {
-  if (!existsSync(path)) return fallback;
-  return readFileSync(path, "utf8");
-}
-
-export function listDirectories(path) {
-  if (!existsSync(path)) return [];
-  return readdirSync(path)
-    .map((name) => join(path, name))
-    .filter((entry) => statSync(entry).isDirectory());
 }
 
 export function unique(values) {

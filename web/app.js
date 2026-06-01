@@ -465,6 +465,71 @@ async function convertAsset(asset, target) {
   return data;
 }
 
+async function loadAsset(asset) {
+  const response = await fetch(`/api/assets/${encodeURIComponent(asset.id)}`);
+  const data = await response.json();
+  if (!response.ok) throw new Error(data.error || "资产读取失败");
+  return data;
+}
+
+async function openAssetContext(asset) {
+  try {
+    const fullAsset = await loadAsset(asset);
+    openContextDialog({
+      kicker: assetTypeLabel(fullAsset),
+      title: assetImportTitle(fullAsset),
+      text: assetImportText(fullAsset),
+      files: assetFiles(fullAsset)
+    });
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
+  }
+}
+
+function removeAssetFromDashboard(assetId) {
+  if (!state.dashboard) return;
+  const removeFromList = (items = []) => items.filter((item) => item.id !== assetId);
+  state.dashboard.projects = state.dashboard.projects.map((project) => ({
+    ...project,
+    assets: removeFromList(project.assets),
+    capsules: removeFromList(project.capsules),
+    skillAssets: removeFromList(project.skillAssets)
+  }));
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, {
+      ...options,
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function deleteAsset(asset, button) {
+  try {
+    button.disabled = true;
+    button.textContent = "删除中";
+    const response = await fetchWithTimeout(`/api/assets/${encodeURIComponent(asset.id)}`, {
+      method: "DELETE"
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok && response.status !== 404) throw new Error(data.error || "删除失败");
+    removeAssetFromDashboard(asset.id);
+    renderAll();
+    loadDashboard().catch((error) => window.alert(error instanceof Error ? error.message : String(error)));
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
+  } finally {
+    button.disabled = false;
+    button.textContent = "删除";
+  }
+}
+
 function conversionButtons(asset) {
   const buttons = [];
   const addButton = (label, target) => {
@@ -516,6 +581,7 @@ const assetGroups = [
     type: "capsule",
     kicker: "Capsule",
     title: "会话 Capsule",
+    description: "已保存的 AI 对话资产，适合跨会话接续、分享和转换。",
     emptyTitle: "暂无会话 Capsule",
     emptyDetail: "当前筛选范围内没有会话资产。"
   },
@@ -523,6 +589,7 @@ const assetGroups = [
     type: "knowledge",
     kicker: "Knowledge",
     title: "知识胶囊",
+    description: "从高质量对话中抽取的项目知识，适合导入到同项目会话。",
     emptyTitle: "暂无知识胶囊",
     emptyDetail: "当前筛选范围内没有知识资产。"
   },
@@ -530,6 +597,7 @@ const assetGroups = [
     type: "skill",
     kicker: "Skill",
     title: "团队 Skill",
+    description: "经过审核后可供团队复用的经验、流程和操作能力。",
     emptyTitle: "暂无团队 Skill",
     emptyDetail: "当前筛选范围内没有 Skill 资产。"
   },
@@ -537,6 +605,7 @@ const assetGroups = [
     type: "session",
     kicker: "Session",
     title: "24h 活跃 Session",
+    description: "最近 24 小时内的 Claude Code 会话，尚未保存为资产也会展示。",
     emptyTitle: "暂无活跃 Session",
     emptyDetail: "最近 24 小时内没有发现 Claude Code 会话。"
   }
@@ -580,16 +649,21 @@ function rowAction(label, className = "") {
   return button;
 }
 
+function deleteAssetButton(asset) {
+  const button = rowAction("删除", "danger");
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    deleteAsset(asset, button);
+  });
+  return button;
+}
+
 function assetActions(asset) {
   const actions = el("div", "asset-actions");
   const importButton = rowAction("导入", "primary");
   const shareButton = rowAction("分享");
-  importButton.addEventListener("click", () => openContextDialog({
-    kicker: assetTypeLabel(asset),
-    title: assetImportTitle(asset),
-    text: assetImportText(asset),
-    files: assetFiles(asset)
-  }));
+  importButton.addEventListener("click", () => openAssetContext(asset));
   shareButton.addEventListener("click", async () => {
     try {
       const text = await shareAsset(asset);
@@ -610,10 +684,18 @@ function assetActions(asset) {
   }
   if (asset.type === "capsule") {
     const attachButton = rowAction("接续");
-    const deleteButton = rowAction("删除", "danger");
-    attachButton.addEventListener("click", () => openAttachDialog(asset.payload || {}));
-    deleteButton.addEventListener("click", () => deleteCapsule(asset.payload || asset));
-    actions.append(attachButton, deleteButton);
+    attachButton.addEventListener("click", async () => {
+      try {
+        const fullAsset = await loadAsset(asset);
+        openAttachDialog(fullAsset.payload || {});
+      } catch (error) {
+        window.alert(error instanceof Error ? error.message : String(error));
+      }
+    });
+    actions.append(attachButton);
+  }
+  if (["capsule", "knowledge", "skill"].includes(asset.type)) {
+    actions.append(deleteAssetButton(asset));
   }
   if (asset.type === "skill" && !["approved", "published"].includes(asset.status)) {
     actions.append(badge("submitted", "需审核"));
@@ -650,12 +732,7 @@ function renderAssetCard(asset) {
   row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
     if (event.target.closest("input")) return;
-    openContextDialog({
-      kicker: assetTypeLabel(asset),
-      title: assetImportTitle(asset),
-      text: assetImportText(asset),
-      files: assetFiles(asset)
-    });
+    openAssetContext(asset);
   });
   return row;
 }
@@ -695,6 +772,7 @@ function activeAssetGroup() {
 function renderAssetTabs(assets) {
   const tabs = el("div", "asset-tabs");
   tabs.setAttribute("role", "tablist");
+  tabs.append(el("span", "asset-tabs-label", "资产类型"));
   for (const group of assetGroups) {
     const count = assetCount(assets, group.type);
     const button = el("button", `asset-tab ${state.assetTab === group.type ? "active" : ""}`);
@@ -714,7 +792,8 @@ function renderAssetTabs(assets) {
 function renderAssets(projects) {
   const assets = allAssets(projects);
   const list = document.querySelector("#capsule-list");
-  document.querySelector("#capsule-count").textContent = `${assets.length} 个资产`;
+  const countNode = document.querySelector("#capsule-count");
+  if (countNode) countNode.textContent = `${assets.length} 个资产`;
   if (!assets.length) {
     list.replaceChildren(emptyState("暂无 AI 资产", "使用 /handoff:capture、/handoff:knowledge-ingest 或 /handoff:skill-ingest 生成第一份资产。"));
     return;
@@ -724,8 +803,9 @@ function renderAssets(projects) {
   const visibleAssets = assets.filter((asset) => asset.type === group.type);
   const assetHead = el("div", "asset-board-head");
   const title = el("div");
-  title.append(el("span", "section-kicker", group.kicker), el("h3", "", group.title));
+  title.append(el("span", "section-kicker", group.kicker), el("h3", "", group.title), el("p", "", group.description));
   const tools = el("div", "asset-board-tools");
+  tools.append(el("span", "counter", `${assets.length} 个资产`));
   const newButton = el("button", "mini-button primary", "新建资产");
   newButton.type = "button";
   newButton.addEventListener("click", () => openContextDialog({
@@ -784,15 +864,6 @@ function renderMergeRequests(projects) {
       return link;
     })
   );
-}
-
-async function deleteCapsule(capsule) {
-  if (!window.confirm(`删除 Capsule：${capsule.title}`)) return;
-  const response = await fetch(`/api/capsules/${encodeURIComponent(capsule.id)}`, {
-    method: "DELETE"
-  });
-  if (!response.ok) return;
-  await loadDashboard();
 }
 
 async function loadCapsule(id) {

@@ -15,7 +15,7 @@ import {
   listSkillAssets,
   readSkillAsset
 } from "./skill-platform.js";
-import { listCapsules, readCapsule } from "./store.js";
+import { deleteCapsule, deleteKnowledgeCapsule, deleteSkillAsset, listCapsules, readCapsule } from "./store.js";
 
 function dateValue(value) {
   const time = Date.parse(value || "");
@@ -186,6 +186,39 @@ export function createAssetShare(cwd = process.cwd(), ref, options = {}) {
   if (asset.type === "knowledge") return createKnowledgeShare(cwd, asset.id, options);
   if (asset.type === "skill") return createSkillAssetShare(cwd, asset.id, options);
   throw new Error(`Unsupported asset type: ${asset.type}`);
+}
+
+export function deleteAsset(cwd = process.cwd(), ref) {
+  const asset = readAsset(cwd, ref);
+  if (!asset) return { deleted: false, assetId: ref || "", type: "", title: "" };
+  if (asset.type === "capsule") {
+    const result = deleteCapsule(cwd, asset.id);
+    return {
+      deleted: result.deleted,
+      assetId: result.capsuleId,
+      type: asset.type,
+      title: result.title
+    };
+  }
+  if (asset.type === "knowledge") {
+    const result = deleteKnowledgeCapsule(cwd, asset.id);
+    return {
+      deleted: result.deleted,
+      assetId: result.knowledgeId,
+      type: asset.type,
+      title: result.title
+    };
+  }
+  if (asset.type === "skill") {
+    const result = deleteSkillAsset(cwd, asset.id);
+    return {
+      deleted: result.deleted,
+      assetId: result.skillId,
+      type: asset.type,
+      title: result.title
+    };
+  }
+  return { deleted: false, assetId: asset.id, type: asset.type, title: asset.title };
 }
 
 function createCapsuleFromSession(session, options = {}) {

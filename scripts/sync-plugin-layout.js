@@ -34,14 +34,46 @@ async function ensureSymlink(linkRel, targetRel, type) {
   changed += 1;
 }
 
+async function removeSymlink(linkRel) {
+  const link = path.join(root, linkRel);
+  try {
+    const stat = await lstat(link);
+    if (!stat.isSymbolicLink()) return;
+    await rm(link);
+    changed += 1;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+}
+
+async function removeStaleCommandSymlinks(dirRel, commandFiles) {
+  const dir = path.join(root, dirRel);
+  const valid = new Set(commandFiles);
+  let entries = [];
+  try {
+    entries = await readdir(dir);
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
+  }
+
+  for (const name of entries) {
+    if (!name.endsWith(".md") || valid.has(name)) continue;
+    const file = path.join(dir, name);
+    const stat = await lstat(file);
+    if (!stat.isSymbolicLink()) continue;
+    await rm(file);
+    changed += 1;
+  }
+}
+
 async function main() {
   const commandSource = "plugins/vertical-plugins/handoff-core/commands/handoff";
   const commandFiles = (await readdir(path.join(root, commandSource)))
     .filter((name) => name.endsWith(".md"))
     .sort();
 
-  await ensureSymlink("commands/handoff", "../plugins/vertical-plugins/handoff-core/commands/handoff", "dir");
-  await ensureSymlink("plugins/handoff", "agent-plugins/handoff", "dir");
+  await removeSymlink("commands/handoff");
+  await removeSymlink("plugins/handoff");
   await ensureSymlink(
     "plugins/agent-plugins/handoff/.claude-plugin/plugin.json",
     "../../../../.claude-plugin/plugin.json",
@@ -57,6 +89,7 @@ async function main() {
     "../../../vertical-plugins/handoff-core/skills/handoff-capsule",
     "dir"
   );
+  await removeStaleCommandSymlinks("plugins/agent-plugins/handoff/commands", commandFiles);
 
   for (const fileName of commandFiles) {
     await ensureSymlink(

@@ -1,1 +1,0 @@
-../../../vertical-plugins/handoff-core/commands/handoff/git-sync.md

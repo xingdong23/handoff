@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { createCapsule } from "../core/capsule.js";
 import { createKnowledgeShare, createShare } from "../core/share.js";
 import { createSkillAssetShare } from "../core/skill-platform.js";
-import { convertAsset, createAssetShare, listAssets, readAsset } from "../core/assets.js";
+import { convertAsset, createAssetShare, deleteAsset, listAssets, readAsset } from "../core/assets.js";
 import { getDashboard } from "../core/dashboard.js";
 import { inferGitLabConfig, scanGitLab } from "../core/gitlab.js";
 import { deleteCapsule, getProject, gitLabTokenConfigured, listProjects, readCapsule, readShare, saveGitLabToken, updateProjectGitLab } from "../core/store.js";
@@ -20,8 +20,8 @@ const contentTypes = {
   ".json": "application/json; charset=utf-8"
 };
 
-function send(res, status, body, type = "application/json; charset=utf-8") {
-  res.writeHead(status, { "content-type": type });
+function send(res, status, body, type = "application/json; charset=utf-8", headers = {}) {
+  res.writeHead(status, { "content-type": type, ...headers });
   res.end(body);
 }
 
@@ -39,7 +39,9 @@ async function readBody(req) {
 function serveStatic(res, pathname) {
   const file = pathname === "/" ? join(webDir, "index.html") : join(webDir, pathname);
   if (!file.startsWith(webDir) || !existsSync(file)) return false;
-  send(res, 200, readFileSync(file), contentTypes[extname(file)] || "application/octet-stream");
+  send(res, 200, readFileSync(file), contentTypes[extname(file)] || "application/octet-stream", {
+    "cache-control": "no-store, max-age=0"
+  });
   return true;
 }
 
@@ -158,6 +160,12 @@ export function createHandoffServer({ workspace }) {
           status: url.searchParams.get("status") || "",
           limit: url.searchParams.get("limit") || 100
         }));
+      }
+
+      if (req.method === "DELETE" && pathname.startsWith("/api/assets/")) {
+        const id = decodeURIComponent(pathname.split("/").pop() || "");
+        const result = deleteAsset(workspace, id);
+        return result.deleted ? sendJson(res, result) : sendJson(res, { error: "not found" }, 404);
       }
 
       if (req.method === "GET" && pathname.startsWith("/api/assets/")) {

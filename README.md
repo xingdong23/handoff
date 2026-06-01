@@ -419,7 +419,7 @@ HANDOFF_DB=/absolute/path/handoff.sqlite handoff status
 | `attention_states` | AI 关注队列 |
 | `meta` | 全局设置，例如 GitLab Token |
 
-`.handoff/` 目录用于兼容旧版本资料导入，并已加入 `.gitignore`。新数据默认进入 SQLite。
+项目目录内不再读取 `.handoff/capsules` 文件。会话 Capsule、知识胶囊、Skill Asset 和分享资料均以 SQLite 表为准。
 
 ## Git 状态
 
@@ -508,13 +508,10 @@ flowchart LR
 | 目录 | 作用 |
 | --- | --- |
 | `bin/` | CLI 入口 |
-| `commands/handoff/` | Slash Command 兼容入口，链接到核心能力包 |
-| `.claude/commands/handoff/` | 本地 Claude Code 命令 |
 | `.claude-plugin/` | Claude Code 插件市场清单 |
 | `plugins/agent-plugins/handoff/` | 完整 Handoff Work OS Agent 插件，包含 Agent Prompt、Skill、Commands、CLI 和大盘入口 |
 | `plugins/vertical-plugins/handoff-core/commands/handoff/` | Handoff Slash Command 模板来源 |
 | `plugins/vertical-plugins/handoff-core/skills/` | Handoff 可复用 Skill 来源 |
-| `plugins/handoff/` | 兼容旧入口，指向 `plugins/agent-plugins/handoff/` |
 | `managed-agent-cookbooks/handoff-work-os/` | 托管 Agent 模板，包含 orchestrator 与子 Agent 配置 |
 | `scripts/` | 仓库检查脚本 |
 | `src/cli/` | CLI 参数和命令处理 |

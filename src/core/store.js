@@ -1,8 +1,7 @@
-import { existsSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { ensureDir, listDirectories, nowIso, readJson, readText, slugify } from "./utils.js";
+import { ensureDir, nowIso, slugify } from "./utils.js";
 import { findProjectRoot } from "./git.js";
 import { deriveTitle } from "./titles.js";
 
@@ -351,15 +350,10 @@ function artifactMap(files = []) {
   return artifacts;
 }
 
-function legacyConfig(root) {
-  return readJson(join(root, ".handoff", "config.json"), null);
-}
-
 function ensureProject(cwd = process.cwd(), init = {}) {
   const root = findProjectRoot(cwd);
   const db = openDb();
   const existing = db.prepare("SELECT * FROM projects WHERE root = ?").get(root);
-  const legacy = existing ? null : legacyConfig(root);
   const now = nowIso();
 
   if (existing) {
@@ -388,99 +382,24 @@ function ensureProject(cwd = process.cwd(), init = {}) {
     const row = changedProjectFields(existing, next)
       ? db.prepare("SELECT * FROM projects WHERE root = ?").get(root)
       : existing;
-    importLegacyWorkspace(root, row.id);
     return row;
   }
 
-  const id = uniqueProjectId(db, init.projectId || legacy?.projectId || basename(root), root);
+  const id = uniqueProjectId(db, init.projectId || basename(root), root);
   db.prepare(`
     INSERT INTO projects(id, name, root, gitlab_base_url, gitlab_project_id, gitlab_token, created_at, updated_at)
     VALUES(?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
-    init.projectName || legacy?.projectName || basename(root),
+    init.projectName || basename(root),
     root,
-    init.gitlabBaseUrl || legacy?.gitlab?.baseUrl || "https://gitlab.com",
-    pick(init.gitlabProjectId, legacy?.gitlab?.projectId || ""),
-    init.gitlabToken || legacy?.gitlab?.token || "",
+    init.gitlabBaseUrl || "https://gitlab.com",
+    pick(init.gitlabProjectId, ""),
+    init.gitlabToken || "",
     now,
     now
   );
-  importLegacyWorkspace(root, id);
   return db.prepare("SELECT * FROM projects WHERE root = ?").get(root);
-}
-
-function insertLegacyCapsule(db, projectId, capsule, artifacts) {
-  db.prepare(`
-    INSERT OR IGNORE INTO capsules(
-      id, project_id, title, summary, status, progress_percent,
-      source_app, source_chat_name, source_session_id, conversation_key,
-      capsule_json, transcript_md, context_pack_md, share_pack_md, recovery_prompt_md,
-      files_json, gitlab_links_json, decisions_md, next_actions_md,
-      created_at, updated_at
-    )
-    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    capsule.id,
-    projectId,
-    capsule.title || capsule.id,
-    capsule.summary || "",
-    capsule.progress?.status || "unknown",
-    Number(capsule.progress?.percent || 0),
-    capsule.source?.app || "manual",
-    capsule.source?.chatName || "",
-    capsule.source?.sessionId || "",
-    capsuleConversationKey(capsule),
-    artifacts["capsule.json"] || jsonText(capsule),
-    artifacts["transcript.md"] || "",
-    artifacts["context-pack.md"] || "",
-    artifacts["share-pack.md"] || "",
-    artifacts["recovery-prompt.md"] || normalizedText(capsule.contextPack?.recoveryPrompt || ""),
-    artifacts["files.json"] || jsonText({ files: capsule.contextPack?.files || [] }),
-    artifacts["gitlab-links.json"] || jsonText(capsule.gitlab || {}),
-    artifacts["decisions.md"] || "",
-    artifacts["next-actions.md"] || "",
-    capsule.createdAt || nowIso(),
-    capsule.updatedAt || capsule.createdAt || nowIso()
-  );
-}
-
-function importLegacyWorkspace(root, projectId) {
-  const legacyDir = join(root, ".handoff");
-  if (!existsSync(legacyDir)) return;
-
-  const db = openDb();
-  for (const dir of listDirectories(join(legacyDir, "capsules"))) {
-    const capsule = readJson(join(dir, "capsule.json"), null);
-    if (!capsule?.id) continue;
-    insertLegacyCapsule(db, projectId, capsule, {
-      "capsule.json": jsonText(capsule),
-      "transcript.md": readText(join(dir, "transcript.md"), ""),
-      "context-pack.md": readText(join(dir, "context-pack.md"), ""),
-      "share-pack.md": readText(join(dir, "share-pack.md"), ""),
-      "recovery-prompt.md": readText(join(dir, "recovery-prompt.md"), ""),
-      "files.json": jsonText(readJson(join(dir, "files.json"), { files: capsule.contextPack?.files || [] })),
-      "gitlab-links.json": jsonText(readJson(join(dir, "gitlab-links.json"), capsule.gitlab || {})),
-      "decisions.md": readText(join(dir, "decisions.md"), ""),
-      "next-actions.md": readText(join(dir, "next-actions.md"), "")
-    });
-  }
-
-  const gitlabState = readJson(join(legacyDir, "gitlab", "state.json"), null);
-  if (gitlabState) {
-    db.prepare(`
-      INSERT OR IGNORE INTO gitlab_states(project_id, state_json, scanned_at)
-      VALUES(?, ?, ?)
-    `).run(projectId, jsonText(gitlabState), gitlabState.scannedAt || null);
-  }
-
-  const attentionState = readJson(join(legacyDir, "reminders", "attention.json"), null);
-  if (attentionState) {
-    db.prepare(`
-      INSERT OR IGNORE INTO attention_states(project_id, payload_json, scanned_at)
-      VALUES(?, ?, ?)
-    `).run(projectId, jsonText(attentionState), attentionState.scannedAt || null);
-  }
 }
 
 function capsuleSummary(row) {
@@ -663,18 +582,10 @@ function capsuleRowByRef(cwd, ref) {
 
 export function workspacePaths(cwd = process.cwd()) {
   const root = findProjectRoot(cwd);
-  const handoffDir = join(root, ".handoff");
   return {
     root,
     dbPath: dbPath(),
-    handoffHome: dirname(dbPath()),
-    handoffDir,
-    capsulesDir: join(handoffDir, "capsules"),
-    sharesDir: join(handoffDir, "shares"),
-    gitlabDir: join(handoffDir, "gitlab"),
-    remindersDir: join(handoffDir, "reminders"),
-    configPath: join(handoffDir, "config.json"),
-    indexPath: join(handoffDir, "index.json")
+    handoffHome: dirname(dbPath())
   };
 }
 
@@ -846,7 +757,9 @@ export function deleteCapsule(cwd = process.cwd(), ref) {
   const row = capsuleRowByRef(cwd, ref);
   if (!row) return { deleted: false, capsuleId: ref || "", title: "" };
   const capsule = hydrateCapsule(row);
-  const result = openDb().prepare("DELETE FROM capsules WHERE id = ?").run(row.id);
+  const db = openDb();
+  const result = db.prepare("DELETE FROM capsules WHERE id = ?").run(row.id);
+  if (result.changes) db.prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(nowIso(), row.project_id);
   return {
     deleted: Boolean(result.changes),
     capsuleId: row.id,
@@ -856,23 +769,7 @@ export function deleteCapsule(cwd = process.cwd(), ref) {
 
 export function readCapsule(cwd = process.cwd(), ref) {
   const row = capsuleRowByRef(cwd, ref);
-  if (row) return hydrateCapsule(row);
-
-  const direct = resolve(ref || "");
-  const paths = workspacePaths(cwd);
-  const candidates = [
-    join(paths.capsulesDir, ref || "", "capsule.json"),
-    join(paths.capsulesDir, ref || ""),
-    direct,
-    join(direct, "capsule.json")
-  ];
-
-  for (const candidate of candidates) {
-    const capsule = readJson(candidate, null);
-    if (capsule?.id) return capsule;
-  }
-
-  return null;
+  return row ? hydrateCapsule(row) : null;
 }
 
 export function readCapsuleArtifacts(cwd = process.cwd(), ref) {
@@ -1040,6 +937,17 @@ export function readKnowledgeCapsule(cwd = process.cwd(), ref) {
   return row ? rowToKnowledge(row) : null;
 }
 
+export function deleteKnowledgeCapsule(cwd = process.cwd(), ref) {
+  const knowledge = readKnowledgeCapsule(cwd, ref);
+  if (!knowledge) return { deleted: false, knowledgeId: ref || "", title: "" };
+  const result = openDb().prepare("DELETE FROM knowledge_capsules WHERE id = ?").run(knowledge.id);
+  return {
+    deleted: Boolean(result.changes),
+    knowledgeId: knowledge.id,
+    title: knowledge.title
+  };
+}
+
 export function listKnowledgeCapsules(cwd = process.cwd(), options = {}) {
   const db = openDb();
   const limit = Math.max(1, Math.min(Number(options.limit || 200), 1000));
@@ -1178,6 +1086,17 @@ export function readSkillAsset(cwd = process.cwd(), ref) {
     LIMIT 1
   `).get(value, value);
   return row ? rowToSkillAsset(row) : null;
+}
+
+export function deleteSkillAsset(cwd = process.cwd(), ref) {
+  const asset = readSkillAsset(cwd, ref);
+  if (!asset) return { deleted: false, skillId: ref || "", title: "" };
+  const result = openDb().prepare("DELETE FROM skill_assets WHERE id = ?").run(asset.id);
+  return {
+    deleted: Boolean(result.changes),
+    skillId: asset.id,
+    title: asset.title
+  };
 }
 
 export function listSkillAssets(cwd = process.cwd(), options = {}) {

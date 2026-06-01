@@ -23,6 +23,7 @@ import {
 import {
   convertAsset,
   createAssetShare,
+  deleteAsset,
   importAssetContext,
   ingestKnowledgeAsset,
   ingestSkillAsset,
@@ -60,11 +61,11 @@ test("creates a capsule from structured json", () => {
     nextActions: ["Add concurrency limit"]
   });
 
-  const { capsule, capsuleDir } = createCapsule({ cwd, title: "payment timeout", input, source: "test" });
+  const { capsule, capsuleStorage } = createCapsule({ cwd, title: "payment timeout", input, source: "test" });
   assert.equal(capsule.progress.percent, 55);
   assert.equal(capsule.contextPack.decisions[0], "Use exponential backoff");
   assert.match(capsule.contextPack.recoveryPrompt, /Patch RetryScheduler/);
-  assert.match(capsuleDir, /^sqlite:/);
+  assert.match(capsuleStorage, /^sqlite:/);
   assert.match(readCapsuleArtifacts(cwd, capsule.id)["context-pack.md"], /RetryScheduler/);
   assert.equal(readCapsule(cwd, capsule.id).id, capsule.id);
 });
@@ -83,53 +84,23 @@ test("derives a readable title when command title is generic", () => {
   assert.match(capsule.id, /cap_.*_car-service-只读边界修复/);
 });
 
-test("dashboard derives a readable title for legacy generic capsules", () => {
-  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
-  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
-  const capsuleDir = join(cwd, ".handoff", "capsules", "cap_legacy");
-  mkdirSync(capsuleDir, { recursive: true });
-  writeFileSync(
-    join(capsuleDir, "capsule.json"),
-    `${JSON.stringify({
-      id: "cap_legacy",
-      title: "handoff capsule",
-      summary: "针对截图问题（car_service 是只读子 agent）做了根因定位与修复。",
-      source: { app: "claude-code", chatName: "micar-agent", sessionId: "" },
-      progress: { status: "in_progress", percent: 92, currentStep: "", nextStep: "" },
-      contextPack: { facts: [], decisions: [], files: [], commands: [], openQuestions: [], nextActions: [] },
-      createdAt: "2026-05-29T00:00:00.000Z",
-      updatedAt: "2026-05-29T00:00:00.000Z"
-    })}\n`,
-    "utf8"
-  );
-
-  const dashboard = getDashboard(cwd);
-  assert.equal(dashboard.projects[0].capsules[0].title, "car_service 只读边界修复");
-  assert.equal(readCapsule(cwd, "cap_legacy").title, "car_service 只读边界修复");
-});
-
 test("rewrites low signal opening titles from conversation context", () => {
   const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
   process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
-  const capsuleDir = join(cwd, ".handoff", "capsules", "cap_low_signal");
-  mkdirSync(capsuleDir, { recursive: true });
-  writeFileSync(
-    join(capsuleDir, "capsule.json"),
-    `${JSON.stringify({
-      id: "cap_low_signal",
+  const { capsule } = createCapsule({
+    cwd,
+    title: "用户反馈截图：car_service 子 agent 是只读的",
+    input: JSON.stringify({
       title: "用户反馈截图：car_service 子 agent 是只读的",
       summary: "用户反馈截图：car_service 子 agent 是只读的（只能查不能预约），但 main agent 在工单查询结果后追加了\"要不要帮你重新约个时间？\"。定位根因后完成 car_service 只读边界与改约引导修复。",
-      source: { app: "claude-code", chatName: "micar-agent", sessionId: "" },
-      progress: { status: "in_progress", percent: 92, currentStep: "", nextStep: "" },
-      contextPack: { facts: [], decisions: [], files: [], commands: [], openQuestions: [], nextActions: [] },
-      createdAt: "2026-05-29T00:00:00.000Z",
-      updatedAt: "2026-05-29T00:00:00.000Z"
-    })}\n`,
-    "utf8"
-  );
+      status: "in_progress",
+      progressPercent: 92
+    }),
+    source: "claude-code"
+  });
 
   assert.equal(getDashboard(cwd).projects[0].capsules[0].title, "car_service 只读边界与改约引导修复");
-  assert.equal(readCapsule(cwd, "cap_low_signal").title, "car_service 只读边界与改约引导修复");
+  assert.equal(readCapsule(cwd, capsule.id).title, "car_service 只读边界与改约引导修复");
 });
 
 test("creates a share payload", () => {
@@ -246,6 +217,31 @@ test("deletes a capsule and its share payload", () => {
   assert.equal(result.capsuleId, capsule.id);
   assert.equal(readCapsule(cwd, capsule.id), null);
   assert.equal(readShare(cwd, share.token), null);
+  assert.equal(getDashboard(cwd).totals.capsules, 0);
+});
+
+test("ignores file-only capsule directories", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+  const fileOnlyDir = join(cwd, ".handoff", "capsules", "cap_file_only");
+  mkdirSync(fileOnlyDir, { recursive: true });
+  writeFileSync(
+    join(fileOnlyDir, "capsule.json"),
+    `${JSON.stringify({
+      id: "cap_file_only",
+      title: "file-only capsule",
+      summary: "File data should stay outside the dashboard.",
+      source: { app: "claude-code", chatName: "", sessionId: "" },
+      progress: { status: "in_progress", percent: 10, currentStep: "", nextStep: "" },
+      contextPack: { facts: [], decisions: [], files: [], commands: [], openQuestions: [], nextActions: [] },
+      createdAt: "2026-05-29T00:00:00.000Z",
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    })}\n`,
+    "utf8"
+  );
+
+  assert.equal(existsSync(fileOnlyDir), true);
+  assert.equal(readCapsule(cwd, "cap_file_only"), null);
   assert.equal(getDashboard(cwd).totals.capsules, 0);
 });
 
@@ -461,6 +457,18 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
   assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
   assert.equal(getDashboard(cwd).totals.assets, 7);
+
+  const deletedSkill = deleteAsset(cwd, skillFromKnowledge.target.id);
+  assert.equal(deletedSkill.deleted, true);
+  assert.equal(readAsset(cwd, skillFromKnowledge.target.id), null);
+
+  const deletedKnowledge = deleteAsset(cwd, convertedKnowledge.target.id);
+  assert.equal(deletedKnowledge.deleted, true);
+  assert.equal(readAsset(cwd, convertedKnowledge.target.id), null);
+
+  const deletedCapsule = deleteAsset(cwd, skillBundle.capsule.id);
+  assert.equal(deletedCapsule.deleted, true);
+  assert.equal(readAsset(cwd, skillBundle.capsule.id), null);
 });
 
 test("reads 24h Claude Code sessions as dashboard assets", () => {

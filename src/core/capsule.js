@@ -1,6 +1,4 @@
-import { join } from "node:path";
-import { readFileSync } from "node:fs";
-import { capsuleId, compact, nowIso, unique, writeText } from "./utils.js";
+import { capsuleId, compact, nowIso, unique } from "./utils.js";
 import { getGitRequirementStatus, getGitSnapshot } from "./git.js";
 import { ensureWorkspace, loadConfig, saveCapsule } from "./store.js";
 import { bulletList, fieldLine, firstParagraph, sectionList } from "./markdown.js";
@@ -289,21 +287,17 @@ export function createCapsule(options = {}) {
 
   capsule.contextPack.recoveryPrompt = buildRecoveryPrompt(capsule);
 
-  const capsuleDir = saveCapsule(cwd, capsule, [
+  const capsuleStorage = saveCapsule(cwd, capsule, [
     { kind: "json", name: "capsule.json", value: capsule },
-    { kind: "text", name: "transcript.md", value: context.raw || input, writeText },
-    { kind: "text", name: "context-pack.md", value: buildContextPackMarkdown(capsule), writeText },
-    { kind: "text", name: "share-pack.md", value: buildSharePackMarkdown(capsule), writeText },
-    { kind: "text", name: "recovery-prompt.md", value: capsule.contextPack.recoveryPrompt, writeText },
+    { kind: "text", name: "transcript.md", value: context.raw || input },
+    { kind: "text", name: "context-pack.md", value: buildContextPackMarkdown(capsule) },
+    { kind: "text", name: "share-pack.md", value: buildSharePackMarkdown(capsule) },
+    { kind: "text", name: "recovery-prompt.md", value: capsule.contextPack.recoveryPrompt },
     { kind: "json", name: "files.json", value: { files } },
     { kind: "json", name: "gitlab-links.json", value: capsule.gitlab },
-    { kind: "text", name: "decisions.md", value: bulletList("Decisions", capsule.contextPack.decisions), writeText },
-    { kind: "text", name: "next-actions.md", value: bulletList("Next Actions", capsule.contextPack.nextActions), writeText }
+    { kind: "text", name: "decisions.md", value: bulletList("Decisions", capsule.contextPack.decisions) },
+    { kind: "text", name: "next-actions.md", value: bulletList("Next Actions", capsule.contextPack.nextActions) }
   ]);
 
-  return { capsule, capsuleDir };
-}
-
-export function readTranscript(path) {
-  return readFileSync(join(path, "transcript.md"), "utf8");
+  return { capsule, capsuleStorage };
 }

@@ -8,7 +8,6 @@ import { createKnowledgeShare, createShare } from "../core/share.js";
 import { getDashboard } from "../core/dashboard.js";
 import { deleteCapsule, readCapsule, readShare, ensureWorkspace, loadConfig, saveConfig, listCapsules } from "../core/store.js";
 import { scanGitLab } from "../core/gitlab.js";
-import { syncCapsuleToGit } from "../core/git-sync.js";
 import { computeAttention, saveAttention } from "../core/reminders.js";
 import { getGitSnapshot } from "../core/git.js";
 import {
@@ -87,7 +86,6 @@ function usage() {
     "  handoff status --json",
     "  handoff open --port 7349 --workspace <dir>",
     "  handoff dashboard --port 7349 --workspace <dir>",
-    "  handoff git sync <capsule-id> --commit --push",
     "  handoff gitlab scan --project-id <group/project>",
     "  handoff reminders scan",
     ""
@@ -259,7 +257,7 @@ async function commandCapture(args) {
     sessionId: args.session,
     summary: args.summary
   });
-  process.stdout.write(`${result.capsule.id}\n${result.capsuleDir}\n`);
+  process.stdout.write(`${result.capsule.id}\n${result.capsuleStorage}\n`);
 }
 
 async function commandShare(args) {
@@ -708,18 +706,6 @@ async function commandOpen(args) {
   if (!args["no-browser"]) process.stdout.write(`browser=${browserOpened ? "opened" : "failed"}\n`);
 }
 
-async function commandGit(args) {
-  const sub = args._[1];
-  if (sub !== "sync") throw new Error("Supported git command: handoff git sync <capsule-id>");
-  const ref = args._[2];
-  if (!ref) throw new Error("Capsule id is required");
-  const result = syncCapsuleToGit(process.cwd(), ref, {
-    commit: Boolean(args.commit),
-    push: Boolean(args.push)
-  });
-  printJson(result);
-}
-
 async function commandGitLab(args) {
   const sub = args._[1];
   if (sub !== "scan") throw new Error("Supported gitlab command: handoff gitlab scan");
@@ -769,7 +755,6 @@ export async function runCli(argv) {
   if (command === "status") return commandStatus(args);
   if (command === "open") return commandOpen(args);
   if (command === "dashboard") return commandDashboard(args);
-  if (command === "git") return commandGit(args);
   if (command === "gitlab") return commandGitLab(args);
   if (command === "reminders") return commandReminders(args);
 
