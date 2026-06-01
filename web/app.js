@@ -472,86 +472,144 @@ function conversionButtons(asset) {
   return buttons;
 }
 
+const assetGroups = [
+  {
+    type: "knowledge",
+    kicker: "Knowledge",
+    title: "知识胶囊",
+    emptyTitle: "暂无知识胶囊",
+    emptyDetail: "当前筛选范围内没有知识资产。"
+  },
+  {
+    type: "skill",
+    kicker: "Skill",
+    title: "团队 Skill",
+    emptyTitle: "暂无团队 Skill",
+    emptyDetail: "当前筛选范围内没有 Skill 资产。"
+  },
+  {
+    type: "capsule",
+    kicker: "Capsule",
+    title: "会话 Capsule",
+    emptyTitle: "暂无会话 Capsule",
+    emptyDetail: "当前筛选范围内没有会话资产。"
+  }
+];
+
+function assetMetaItems(asset) {
+  const items = [asset.projectName, asset.scope || "project"];
+  if (asset.source?.type || asset.source?.app) items.push(asset.source.type || asset.source.app);
+  if (asset.type === "skill" && asset.assetType) items.push(asset.assetType);
+  if (asset.type === "capsule") {
+    const repo = gitRequirementRepo(asset.payload || {});
+    if (repo?.branch) items.push(repo.branch);
+    if (repo) {
+      items.push(gitStatusValue(repo.committed));
+      items.push(pushStatusValue(repo.pushed));
+    }
+  }
+  return items.filter(Boolean);
+}
+
+function assetProgress(asset) {
+  if (asset.type !== "capsule") return null;
+  const row = el("div", "asset-progress");
+  row.append(progressBar(asset.payload?.progress?.percent || 0), el("span", "", `${percent(asset.payload?.progress?.percent)}%`));
+  return row;
+}
+
+function assetActions(asset) {
+  const actions = el("div", "asset-actions");
+  const importButton = el("button", "mini-button primary", "导入");
+  const shareButton = el("button", "mini-button", "分享");
+  importButton.addEventListener("click", () => openContextDialog({
+    kicker: assetTypeLabel(asset),
+    title: assetImportTitle(asset),
+    text: assetImportText(asset),
+    files: assetFiles(asset)
+  }));
+  shareButton.addEventListener("click", async () => {
+    try {
+      const text = await shareAsset(asset);
+      openContextDialog({
+        kicker: "Share",
+        title: "分享资产",
+        text,
+        files: [asset.id]
+      });
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : String(error));
+    }
+  });
+  actions.append(importButton, shareButton, ...conversionButtons(asset));
+  if (asset.type === "capsule") {
+    const attachButton = el("button", "mini-button", "接续");
+    const deleteButton = el("button", "mini-button danger", "删除");
+    attachButton.addEventListener("click", () => openAttachDialog(asset.payload || {}));
+    deleteButton.addEventListener("click", () => deleteCapsule(asset.payload || asset));
+    actions.append(attachButton, deleteButton);
+  }
+  if (asset.type === "skill" && !["approved", "published"].includes(asset.status)) {
+    actions.append(badge("submitted", "需审核"));
+  }
+  return actions;
+}
+
+function renderAssetCard(asset) {
+  const card = el("article", `asset-card ${asset.type}-asset`);
+  const main = el("div", "asset-card-main");
+  const header = el("div", "asset-card-header");
+  const title = el("strong", "", asset.title);
+  header.append(title, badge(asset.status || "available"));
+  const summary = el("p", "asset-summary", compact(asset.summary || "暂无摘要", 190));
+  const meta = el("div", "asset-meta-line");
+  meta.replaceChildren(...assetMetaItems(asset).map((item) => el("span", "", item)));
+  main.append(header, summary);
+  const progress = assetProgress(asset);
+  if (progress) main.append(progress);
+  main.append(meta);
+  card.append(main, assetActions(asset));
+  card.addEventListener("click", (event) => {
+    if (event.target.closest("button")) return;
+    openContextDialog({
+      kicker: assetTypeLabel(asset),
+      title: assetImportTitle(asset),
+      text: assetImportText(asset),
+      files: assetFiles(asset)
+    });
+  });
+  return card;
+}
+
+function renderAssetSection(group, assets) {
+  const section = el("section", `asset-section ${group.type}-section`);
+  const header = el("div", "asset-section-header");
+  const title = el("div", "asset-section-title");
+  title.append(el("span", "section-kicker", group.kicker), el("h4", "", group.title));
+  header.append(title, el("span", "counter", `${assets.length} 个`));
+  const list = el("div", "asset-section-list");
+  list.replaceChildren(
+    ...(assets.length
+      ? assets.map(renderAssetCard)
+      : [emptyState(group.emptyTitle, group.emptyDetail)])
+  );
+  section.append(header, list);
+  return section;
+}
+
 function renderAssets(projects) {
   const assets = allAssets(projects);
   const list = document.querySelector("#capsule-list");
-  document.querySelector("#capsule-count").textContent = `${assets.length} 个`;
+  document.querySelector("#capsule-count").textContent = `${assets.length} 个资产`;
   if (!assets.length) {
     list.replaceChildren(emptyState("暂无 AI 资产", "使用 /handoff:capture、/handoff:knowledge-ingest 或 /handoff:skill-ingest 生成第一份资产。"));
     return;
   }
 
   list.replaceChildren(
-    ...assets.map((asset) => {
-      const card = el("article", "capsule-card");
-      const title = el("div", "capsule-title");
-      title.append(el("strong", "", asset.title), badge(asset.status || "available"));
-      const summary = el("p", "", compact(asset.summary || "暂无摘要", 170));
-      const meta = el("div", "capsule-meta");
-      meta.append(
-        el("span", "asset-type", assetTypeLabel(asset)),
-        el("span", "", asset.scope || "project"),
-        el("span", "", asset.projectName)
-      );
-      if (asset.source?.type || asset.source?.app) meta.append(el("span", "", asset.source.type || asset.source.app));
-      if (asset.type === "capsule") {
-        const repo = gitRequirementRepo(asset.payload || {});
-        const progress = asset.payload?.progress?.percent;
-        meta.append(el("span", "", `${percent(progress)}%`));
-        if (repo?.branch) meta.append(el("span", "", repo.branch));
-        if (repo) {
-          meta.append(el("span", "", gitStatusValue(repo.committed)));
-          meta.append(el("span", "", pushStatusValue(repo.pushed)));
-        }
-      }
-      const actions = el("div", "capsule-actions");
-      const importButton = el("button", "mini-button primary", "Import");
-      const shareButton = el("button", "mini-button", "Share");
-      importButton.addEventListener("click", () => openContextDialog({
-        kicker: assetTypeLabel(asset),
-        title: assetImportTitle(asset),
-        text: assetImportText(asset),
-        files: assetFiles(asset)
-      }));
-      shareButton.addEventListener("click", async () => {
-        try {
-          const text = await shareAsset(asset);
-          openContextDialog({
-            kicker: "Share",
-            title: "分享资产",
-            text,
-            files: [asset.id]
-          });
-        } catch (error) {
-          window.alert(error instanceof Error ? error.message : String(error));
-        }
-      });
-      actions.append(importButton, shareButton);
-      actions.append(...conversionButtons(asset));
-      if (asset.type === "capsule") {
-        const attachButton = el("button", "mini-button", "Attach");
-        const deleteButton = el("button", "mini-button danger", "删除");
-        attachButton.addEventListener("click", () => openAttachDialog(asset.payload || {}));
-        deleteButton.addEventListener("click", () => deleteCapsule(asset.payload || asset));
-        actions.append(attachButton, deleteButton);
-      }
-      if (asset.type === "skill" && !["approved", "published"].includes(asset.status)) {
-        actions.append(badge("submitted", "需审核"));
-      }
-      card.append(title, summary);
-      if (asset.type === "capsule") card.append(progressBar(asset.payload?.progress?.percent || 0));
-      card.append(meta, actions);
-      card.addEventListener("click", (event) => {
-        if (event.target.closest("button")) return;
-        openContextDialog({
-          kicker: assetTypeLabel(asset),
-          title: assetImportTitle(asset),
-          text: assetImportText(asset),
-          files: assetFiles(asset)
-        });
-      });
-      return card;
-    })
+    ...assetGroups.map((group) =>
+      renderAssetSection(group, assets.filter((asset) => asset.type === group.type))
+    )
   );
 }
 
