@@ -323,8 +323,9 @@ function applySideState() {
   const toggle = document.querySelector("#side-toggle");
   grid.classList.toggle("side-expanded", state.sideOpen);
   grid.classList.toggle("side-collapsed", !state.sideOpen);
-  toggle.textContent = state.sideOpen ? "收起" : "展开";
+  toggle.textContent = state.sideOpen ? "收起" : "";
   toggle.setAttribute("aria-expanded", String(state.sideOpen));
+  toggle.setAttribute("aria-label", state.sideOpen ? "收起侧栏" : "展开侧栏");
 }
 
 function openSidePanel(targetId) {

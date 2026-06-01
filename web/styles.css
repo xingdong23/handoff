@@ -311,7 +311,7 @@ select {
 
 .content-grid {
   display: grid;
-  grid-template-columns: 54px minmax(0, 1fr);
+  grid-template-columns: 64px minmax(0, 1fr);
   gap: 12px;
   align-items: start;
 }
@@ -330,33 +330,68 @@ select {
 .side-column {
   position: sticky;
   top: 10px;
+  justify-items: center;
 }
 
 .side-toggle {
-  width: 100%;
-  min-height: 36px;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--panel);
   color: var(--ink);
-  font-size: 11px;
-  font-weight: 800;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.05);
+}
+
+.side-toggle::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-right: 2px solid var(--blue);
+  border-bottom: 2px solid var(--blue);
+  transform: rotate(-45deg);
+}
+
+.content-grid.side-expanded .side-toggle {
+  width: 100%;
+}
+
+.content-grid.side-expanded .side-toggle::before {
+  transform: rotate(135deg);
 }
 
 .side-rail {
+  width: 54px;
   display: grid;
-  gap: 10px;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: 0 16px 42px rgba(15, 23, 42, 0.05);
 }
 
 .rail-item {
   display: grid;
   place-items: center;
-  gap: 6px;
-  min-height: 84px;
-  border: 1px solid var(--line);
+  gap: 3px;
+  width: 40px;
+  min-height: 48px;
+  padding: 5px 0;
+  border: 0;
   border-radius: 8px;
-  background: var(--panel);
+  background: transparent;
   color: var(--ink);
+}
+
+.rail-item:hover {
+  background: var(--blue-soft);
 }
 
 .rail-item span {
@@ -367,7 +402,7 @@ select {
 }
 
 .rail-item strong {
-  font-size: 20px;
+  font-size: 16px;
   line-height: 1;
 }
 
@@ -1012,14 +1047,26 @@ pre {
 
   .side-column {
     position: static;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: stretch;
+    justify-items: stretch;
   }
 
   .side-rail {
+    width: auto;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .rail-item {
-    min-height: 54px;
+    width: auto;
+    min-height: 40px;
+    grid-template-columns: auto auto;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .side-panels {
+    grid-column: 1 / -1;
   }
 }
 
