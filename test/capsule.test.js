@@ -31,6 +31,7 @@ import {
   readAsset
 } from "../src/core/assets.js";
 import { listActiveSessions } from "../src/core/active-sessions.js";
+import { enterMode, importModeSkill, modeStatus } from "../src/core/modes.js";
 
 process.env.HANDOFF_CLAUDE_HOME = mkdtempSync(join(tmpdir(), "handoff-empty-claude-"));
 
@@ -402,7 +403,9 @@ test("publishes skill assets after review", () => {
   assert.equal(share.artifactType, "skill_asset");
   assert.equal(share.artifactId, fromKnowledge.id);
   assert.equal(readShare(cwd, share.token).skill.id, fromKnowledge.id);
-  assert.match(importSkillAsset(cwd, share), /bounded exponential backoff/);
+  assert.match(importSkillAsset(cwd, share), /Handoff Skill Manifest/);
+  assert.doesNotMatch(importSkillAsset(cwd, share), /## Content/);
+  assert.match(importSkillAsset(cwd, share, { activate: true }), /bounded exponential backoff/);
   assert.equal(getDashboard(cwd).totals.skillAssets, 3);
 });
 
@@ -455,7 +458,8 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   reviewSkillAsset(cwd, skillBundle.skill.id, { approve: true, reviewer: "asset curator" });
   const skillShare = createAssetShare(cwd, skillBundle.skill.id, { visibility: "team" });
   assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
-  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
+  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Manifest/);
+  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token), { activate: true }), /Handoff Skill Import/);
   assert.equal(getDashboard(cwd).totals.assets, 7);
 
   const deletedSkill = deleteAsset(cwd, skillFromKnowledge.target.id);
@@ -469,6 +473,54 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   const deletedCapsule = deleteAsset(cwd, skillBundle.capsule.id);
   assert.equal(deletedCapsule.deleted, true);
   assert.equal(readAsset(cwd, skillBundle.capsule.id), null);
+});
+
+test("enters team development mode with approved skill manifests and activates skill on demand", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-mode-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+
+  const skill = submitSkillAsset(cwd, [
+    "# Nacos 接入",
+    "",
+    "## When to use",
+    "",
+    "1. Spring Boot 项目需要接入 Nacos",
+    "",
+    "## Inputs",
+    "",
+    "1. nacos_server_addr",
+    "2. namespace",
+    "",
+    "## Content",
+    "",
+    "完整 Nacos 接入步骤。"
+  ].join("\n"), {
+    title: "Nacos 接入",
+    type: "skill"
+  });
+  reviewSkillAsset(cwd, skill.id, { approve: true, reviewer: "curator" });
+
+  const entered = enterMode(cwd, "team-development", {
+    harnessRoot: "/Users/chengzheng/workspace/chuangxin/harness"
+  });
+  assert.equal(entered.session.modeId, "team-development");
+  assert.equal(entered.session.engine, "harness");
+  assert.equal(entered.session.loadedAssets.length, 1);
+  assert.equal(entered.session.loadedAssets[0].loadState, "reference");
+  assert.match(entered.prompt, /Harness 阶段/);
+  assert.match(entered.prompt, /Nacos 接入/);
+
+  const referenced = importModeSkill(cwd, skill.id);
+  assert.equal(referenced.loadState, "reference");
+  assert.match(referenced.text, /Handoff Skill Manifest/);
+  assert.doesNotMatch(referenced.text, /完整 Nacos 接入步骤/);
+
+  const activated = importModeSkill(cwd, skill.id, { activate: true });
+  assert.equal(activated.loadState, "active");
+  assert.match(activated.text, /Handoff Skill Import/);
+  assert.match(activated.text, /完整 Nacos 接入步骤/);
+  assert.equal(modeStatus(cwd).session.loadedAssets[0].loadState, "active");
+  assert.equal(getDashboard(cwd).projects[0].modeSession.modeId, "team-development");
 });
 
 test("reads 24h Claude Code sessions as dashboard assets", () => {
@@ -521,9 +573,9 @@ test("reads 24h Claude Code sessions as dashboard assets", () => {
   const dashboard = getDashboard(cwd, { activeSessions: { claudeHome, now: "2026-06-01T09:00:00.000Z" } });
   assert.equal(dashboard.totals.activeSessions, 1);
   assert.ok(dashboard.projects[0].assets.some((asset) => asset.type === "session"));
-  assert.match(importAssetContext(cwd, sessions[0].id), /Handoff Active Session Import/);
+  assert.match(importAssetContext(cwd, sessions[0]), /Handoff Active Session Import/);
 
-  const converted = convertAsset(cwd, sessions[0].id, "knowledge");
+  const converted = convertAsset(cwd, sessions[0], "knowledge");
   assert.equal(converted.source.type, "session");
   assert.equal(converted.target.type, "knowledge");
   assert.equal(converted.capsule.source.sessionId, "active-session");

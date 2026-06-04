@@ -193,6 +193,21 @@ function selectedProject() {
   return projects[0] || state.dashboard.projects[0] || null;
 }
 
+function renderModeStatus(projects) {
+  document.querySelector(".mode-chip")?.remove();
+  const project = state.project !== "all"
+    ? selectedProject()
+    : projects.find((item) => item.modeSession) || selectedProject();
+  if (!project?.modeSession) return;
+  const chip = el("div", "mode-chip");
+  chip.append(
+    el("span", "", "Mode"),
+    el("strong", "", project.modeSession.name || project.modeSession.modeId),
+    el("em", "", `${project.modeSession.loadedAssets?.length || 0} skills`)
+  );
+  document.querySelector(".header-left").append(chip);
+}
+
 function effectiveGitLab(project) {
   const configured = project?.gitlabConfig || project?.gitlab?.config || project?.gitlab || {};
   const detected = configured.detected || project?.gitlab?.config?.detected || null;
@@ -372,9 +387,58 @@ function formatUpdated(value) {
 function assetImportTitle(asset) {
   if (asset.type === "capsule") return "接续完整会话";
   if (asset.type === "knowledge") return "导入项目知识";
-  if (asset.type === "skill") return "导入团队 Skill";
+  if (asset.type === "skill") return "引用 Skill Manifest";
   if (asset.type === "session") return "导入活跃 Session";
   return "导入资产上下文";
+}
+
+function skillManifestFromAsset(asset) {
+  const payload = asset.payload || {};
+  return {
+    id: asset.id,
+    title: asset.title,
+    type: asset.assetType || payload.type || "skill",
+    status: asset.status,
+    description: compact(asset.summary || payload.summary || "", 220),
+    updatedAt: asset.updatedAt || payload.updatedAt || ""
+  };
+}
+
+function skillManifestText(asset) {
+  const manifest = skillManifestFromAsset(asset);
+  return [
+    `# Handoff Skill Manifest: ${manifest.title}`,
+    "",
+    `Asset: ${manifest.id}`,
+    `Type: ${manifest.type}`,
+    `Status: ${manifest.status}`,
+    `Load State: reference`,
+    "",
+    "当前只加载 Skill 描述，用于判断是否适合当前任务。",
+    "需要完整 Skill 内容时运行：",
+    "",
+    `handoff skill import "${manifest.id}" --activate`,
+    "",
+    "## Description",
+    "",
+    manifest.description || "暂无描述。"
+  ].join("\n");
+}
+
+function skillActivationText(asset) {
+  const payload = asset.payload || {};
+  return [
+    `# Handoff Skill Import: ${asset.title}`,
+    "",
+    `Asset: ${asset.id}`,
+    `Type: ${asset.assetType || payload.type || "skill"}`,
+    `Status: ${asset.status}`,
+    `Load State: active`,
+    "",
+    "请把以下内容作为当前 AI 对话的可用 Skill 或经验上下文：",
+    "",
+    payload.content || payload.markdown || asset.summary || ""
+  ].join("\n");
 }
 
 function assetImportText(asset) {
@@ -393,17 +457,7 @@ function assetImportText(asset) {
     ].join("\n");
   }
   if (asset.type === "skill") {
-    return [
-      `# Handoff Skill Import: ${asset.title}`,
-      "",
-      `Asset: ${asset.id}`,
-      `Type: ${asset.assetType || "skill"}`,
-      `Status: ${asset.status}`,
-      "",
-      "请把以下内容作为当前 AI 对话的可用 Skill 或经验上下文：",
-      "",
-      payload.content || payload.markdown || asset.summary || ""
-    ].join("\n");
+    return skillManifestText(asset);
   }
   if (asset.type === "session") {
     const messages = payload.recentMessages || [];
@@ -480,6 +534,20 @@ async function openAssetContext(asset) {
       title: assetImportTitle(fullAsset),
       text: assetImportText(fullAsset),
       files: assetFiles(fullAsset)
+    });
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
+  }
+}
+
+async function openSkillActivation(asset) {
+  try {
+    const fullAsset = await loadAsset(asset);
+    openContextDialog({
+      kicker: "Skill",
+      title: "激活完整 Skill",
+      text: skillActivationText(fullAsset),
+      files: [fullAsset.id]
     });
   } catch (error) {
     window.alert(error instanceof Error ? error.message : String(error));
@@ -661,7 +729,7 @@ function deleteAssetButton(asset) {
 
 function assetActions(asset) {
   const actions = el("div", "asset-actions");
-  const importButton = rowAction("导入", "primary");
+  const importButton = rowAction(asset.type === "skill" ? "引用" : "导入", "primary");
   const shareButton = rowAction("分享");
   importButton.addEventListener("click", () => openAssetContext(asset));
   shareButton.addEventListener("click", async () => {
@@ -681,6 +749,11 @@ function assetActions(asset) {
   if (asset.type === "session") {
     actions.replaceChildren(importButton, ...conversionButtons(asset));
     return actions;
+  }
+  if (asset.type === "skill") {
+    const activateButton = rowAction("激活");
+    activateButton.addEventListener("click", () => openSkillActivation(asset));
+    actions.append(activateButton);
   }
   if (asset.type === "capsule") {
     const attachButton = rowAction("接续");
@@ -944,6 +1017,7 @@ async function loadDashboard() {
 function renderAll() {
   const projects = filteredProjects();
   renderMetrics(state.dashboard.totals, projects);
+  renderModeStatus(projects);
   renderSideRail(projects);
   renderAttention(projects);
   renderAssets(projects);

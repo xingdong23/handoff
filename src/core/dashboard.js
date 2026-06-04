@@ -1,6 +1,14 @@
 import { getGitSnapshot } from "./git.js";
 import { inferGitLabConfig } from "./gitlab.js";
-import { ensureWorkspace, listCapsulesForProject, listProjects, listRequirementCapsules, listSkillAssets, loadGitLabStateForProject } from "./store.js";
+import {
+  ensureWorkspace,
+  listCapsulesForProject,
+  listProjects,
+  listRequirementCapsules,
+  listSkillAssets,
+  loadGitLabStateForProject,
+  readCurrentModeSessionForProject
+} from "./store.js";
 import { computeAttention } from "./reminders.js";
 import { listAssets } from "./assets.js";
 import { listActiveSessions } from "./active-sessions.js";
@@ -29,6 +37,7 @@ function summarizeProject(project) {
   const openMrs = visibleMergeRequests.filter((mr) => mr.state === "opened").length;
   const failedPipelines = gitlab.user ? gitlab.pipelines?.filter((pipeline) => pipeline.status === "failed").length || 0 : 0;
   const activeCapsules = capsules.filter((capsule) => capsule.progress?.status === "in_progress").length;
+  const modeSession = readCurrentModeSessionForProject(project.id);
 
   return {
     id: project.id,
@@ -65,6 +74,7 @@ function summarizeProject(project) {
       currentBranch,
       activeMergeRequests
     },
+    modeSession,
     attention
   };
 }
@@ -116,6 +126,7 @@ function emptySessionProject(session) {
       currentBranch: "",
       activeMergeRequests: []
     },
+    modeSession: null,
     attention: []
   };
 }
@@ -168,6 +179,7 @@ export function getDashboard(baseDir = process.cwd(), options = {}) {
       acc.capsules += item.metrics.capsules;
       acc.activeCapsules += item.metrics.activeCapsules;
       acc.activeSessions += item.metrics.activeSessions || 0;
+      acc.modeSessions += item.modeSession ? 1 : 0;
       acc.openMrs += item.metrics.openMrs;
       acc.failedPipelines += item.metrics.failedPipelines;
       acc.attention += item.metrics.attention;
@@ -182,6 +194,7 @@ export function getDashboard(baseDir = process.cwd(), options = {}) {
       capsules: 0,
       activeCapsules: 0,
       activeSessions: 0,
+      modeSessions: 0,
       openMrs: 0,
       failedPipelines: 0,
       attention: 0,

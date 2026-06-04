@@ -45,6 +45,13 @@ import {
   listAssets,
   readAsset
 } from "../core/assets.js";
+import {
+  enterMode,
+  exitMode,
+  importModeSkill,
+  listModes,
+  modeStatus
+} from "../core/modes.js";
 import { startServer } from "../server/index.js";
 
 const packageJsonPath = join(dirname(fileURLToPath(import.meta.url)), "../../package.json");
@@ -82,7 +89,11 @@ function usage() {
     "  handoff skill from-knowledge <knowledge-id> --json",
     "  handoff skill review <asset-id> --approve --reviewer <name>",
     "  handoff skill share <asset-id>",
-    "  handoff skill import <asset-id-or-token-or-url>",
+    "  handoff skill import <asset-id-or-token-or-url> [--activate]",
+    "  handoff mode enter team-development",
+    "  handoff mode import <skill-id> [--activate]",
+    "  handoff mode status --json",
+    "  handoff mode exit",
     "  handoff status --json",
     "  handoff open --port 7349 --workspace <dir>",
     "  handoff dashboard --port 7349 --workspace <dir>",
@@ -286,7 +297,9 @@ async function commandImport(args) {
   const ref = args._[1];
   if (!ref) throw new Error("Asset id, token, or share API URL is required");
   const share = await loadSharePayload(process.cwd(), ref);
-  const text = importAssetContext(process.cwd(), share || ref);
+  const text = importAssetContext(process.cwd(), share || ref, {
+    activate: Boolean(args.activate || args.full)
+  });
   if (!text) throw new Error(`Asset not found: ${ref}`);
   if (args.json) return printJson(share || readAsset(process.cwd(), ref));
   process.stdout.write(`${text}\n`);
@@ -574,8 +587,8 @@ async function commandSkill(args) {
     if (!ref) throw new Error("Skill asset id, token, or share URL is required");
     const share = await loadSharePayload(process.cwd(), ref);
     const text = share?.skill
-      ? importSkillAsset(process.cwd(), share)
-      : importSkillAsset(process.cwd(), ref);
+      ? importSkillAsset(process.cwd(), share, { activate: Boolean(args.activate || args.full) })
+      : importSkillAsset(process.cwd(), ref, { activate: Boolean(args.activate || args.full) });
     if (!text) throw new Error(`Skill asset not found: ${ref}`);
     if (args.json) return printJson(share?.skill || readSkillAsset(process.cwd(), ref));
     process.stdout.write(`${text}\n`);
@@ -658,7 +671,9 @@ async function commandAsset(args) {
     const ref = args._[2];
     if (!ref) throw new Error("Asset id, token, or share URL is required");
     const share = await loadSharePayload(process.cwd(), ref);
-    const text = importAssetContext(process.cwd(), share || ref);
+    const text = importAssetContext(process.cwd(), share || ref, {
+      activate: Boolean(args.activate || args.full)
+    });
     if (!text) throw new Error(`Asset not found: ${ref}`);
     if (args.json) return printJson(share || readAsset(process.cwd(), ref));
     process.stdout.write(`${text}\n`);
@@ -666,6 +681,59 @@ async function commandAsset(args) {
   }
 
   throw new Error("Supported asset commands: handoff asset list, handoff asset show <asset-id>, handoff asset share <asset-id>, handoff asset import <asset-id-or-token-or-url>");
+}
+
+async function commandMode(args) {
+  const sub = args._[1] || "status";
+
+  if (sub === "list") {
+    const modes = listModes();
+    if (args.json) return printJson(modes);
+    for (const mode of modes) {
+      process.stdout.write(`${mode.id}  ${mode.name}  engine=${mode.engine}\n`);
+    }
+    return;
+  }
+
+  if (sub === "enter") {
+    const modeId = args._[2] || args.mode || "team-development";
+    const result = enterMode(process.cwd(), modeId, {
+      harnessRoot: args["harness-root"],
+      keepExisting: Boolean(args["keep-existing"])
+    });
+    if (args.json) return printJson(result);
+    process.stdout.write(`${result.prompt}\n`);
+    return;
+  }
+
+  if (sub === "exit") {
+    const session = exitMode(process.cwd());
+    if (args.json) return printJson({ ended: Boolean(session), session });
+    process.stdout.write(session ? `ended ${session.id} ${session.modeId}\n` : "no active mode\n");
+    return;
+  }
+
+  if (sub === "import") {
+    const ref = args._[2];
+    if (!ref) throw new Error("Skill asset id is required");
+    const result = importModeSkill(process.cwd(), ref, {
+      activate: Boolean(args.activate || args.full),
+      pin: Boolean(args.pin),
+      force: Boolean(args.force)
+    });
+    if (args.json) return printJson(result);
+    process.stdout.write(`${result.text}\n`);
+    return;
+  }
+
+  if (sub === "status") {
+    const result = modeStatus(process.cwd());
+    if (args.json) return printJson(result);
+    process.stdout.write(result.active ? `${result.prompt}\n` : "no active mode\n");
+    return;
+  }
+
+  throw new Error("Supported mode commands: handoff mode list, handoff mode enter <mode-id>, handoff mode import <skill-id>, handoff mode status, handoff mode exit");
 }
 
 async function commandStatus(args) {
@@ -752,6 +820,7 @@ export async function runCli(argv) {
   if (command === "knowledge") return commandKnowledge(args);
   if (command === "memory") return commandMemory(args);
   if (command === "skill") return commandSkill(args);
+  if (command === "mode") return commandMode(args);
   if (command === "status") return commandStatus(args);
   if (command === "open") return commandOpen(args);
   if (command === "dashboard") return commandDashboard(args);

@@ -48,6 +48,84 @@ function cleanList(values = [], max = 80) {
   return unique(values.map((value) => String(value || "").trim()).filter(Boolean)).slice(0, max);
 }
 
+function sectionBody(content, heading) {
+  const lines = String(content || "").split(/\r?\n/);
+  const expected = String(heading || "").trim().toLowerCase();
+  const collected = [];
+  let inside = false;
+  for (const line of lines) {
+    const match = line.match(/^##\s+(.+?)\s*$/);
+    if (match) {
+      if (inside) break;
+      inside = match[1].trim().toLowerCase() === expected;
+      continue;
+    }
+    if (inside) collected.push(line);
+  }
+  return collected.join("\n").trim();
+}
+
+function sectionItems(content, heading, fallback = []) {
+  const body = sectionBody(content, heading);
+  const values = body
+    .split(/\n+/)
+    .map((line) => line.replace(/^\s*(?:[-*]|\d+[.)])\s*/, "").trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith("#"));
+  return cleanList(values.length ? values : fallback, 12);
+}
+
+export function skillAssetManifest(asset) {
+  const content = asset?.content || asset?.markdown || "";
+  const whenToUse = sectionItems(content, "When to use", []);
+  const requiredInputs = sectionItems(content, "Inputs", []);
+  const rawSummary = String(asset?.summary || "").trim();
+  const description = rawSummary && !rawSummary.includes("#")
+    ? compact(rawSummary, 220)
+    : compact(whenToUse[0] || asset?.title || content, 220);
+  return {
+    id: asset?.id || "",
+    title: asset?.title || "未命名 Skill",
+    type: asset?.type || "skill",
+    status: asset?.status || "draft",
+    description,
+    whenToUse: whenToUse.length ? whenToUse : (description ? [description] : []),
+    requiredInputs,
+    source: asset?.source || {},
+    updatedAt: asset?.updatedAt || asset?.createdAt || ""
+  };
+}
+
+export function formatSkillManifestImport(asset) {
+  const manifest = skillAssetManifest(asset);
+  return [
+    `# Handoff Skill Manifest: ${manifest.title}`,
+    "",
+    `Asset: ${manifest.id}`,
+    `Type: ${manifest.type}`,
+    `Status: ${manifest.status}`,
+    `Load State: reference`,
+    "",
+    "当前只加载 Skill 描述，用于判断是否适合当前任务。",
+    "需要完整 Skill 内容时运行：",
+    "",
+    `handoff skill import "${manifest.id}" --activate`,
+    "",
+    "## Description",
+    "",
+    manifest.description || "暂无描述。",
+    "",
+    "## When to use",
+    "",
+    ...(manifest.whenToUse.length ? manifest.whenToUse.map((item, index) => `${index + 1}. ${item}`) : ["暂无记录"]),
+    "",
+    "## Required inputs",
+    "",
+    ...(manifest.requiredInputs.length ? manifest.requiredInputs.map((item, index) => `${index + 1}. ${item}`) : ["暂无记录"]),
+    ""
+  ].join("\n");
+}
+
 export function formatSkillAssetMarkdown(asset) {
   return [
     `# ${asset.title}`,
@@ -232,16 +310,18 @@ export function createSkillAssetShare(cwd = process.cwd(), ref, options = {}) {
 
 export const shareSkillAsset = createSkillAssetShare;
 
-export function importSkillAsset(cwd = process.cwd(), refOrShare) {
+export function importSkillAsset(cwd = process.cwd(), refOrShare, options = {}) {
   const local = typeof refOrShare === "string" ? readSkillAsset(cwd, refOrShare) : null;
   const asset = local || refOrShare?.skill || refOrShare || null;
   if (!asset?.id) return null;
+  if (!options.activate && !options.full) return formatSkillManifestImport(asset);
   return [
     `# Handoff Skill Import: ${asset.title}`,
     "",
     `Asset: ${asset.id}`,
     `Type: ${asset.type}`,
     `Status: ${asset.status}`,
+    `Load State: active`,
     "",
     "请把以下内容作为当前 AI 对话的可用 Skill 或经验上下文：",
     "",

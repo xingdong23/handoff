@@ -153,10 +153,28 @@ handoff skill review "<asset-id>" --approve
 handoff skill share "<asset-id>"
 ```
 
-Import a Skill Asset into the current AI chat by id, token, share page URL, or API URL:
+Reference a Skill Asset into the current AI chat by id, token, share page URL, or API URL. Skill import is lazy by default and returns a Manifest first:
 
 ```bash
 handoff skill import "<asset-id-or-token-or-url>"
+```
+
+Load full Skill content only when the current task needs that Skill:
+
+```bash
+handoff skill import "<asset-id-or-token-or-url>" --activate
+```
+
+Enter a clean team development mode backed by Harness and approved Handoff Skill manifests:
+
+```bash
+handoff mode enter team-development
+```
+
+Import a Skill into the active mode:
+
+```bash
+handoff mode import "<skill-id>"
 ```
 
 ## Dashboard

@@ -128,6 +128,37 @@ select {
   font-size: 11px;
 }
 
+.mode-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--blue-soft);
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.mode-chip span {
+  color: var(--blue);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.mode-chip strong {
+  font-size: 12px;
+}
+
+.mode-chip em {
+  color: var(--muted);
+  font-style: normal;
+  font-weight: 800;
+}
+
 .section-kicker {
   display: inline-flex;
   align-items: center;

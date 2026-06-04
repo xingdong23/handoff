@@ -172,6 +172,35 @@ function migrate(db) {
       share_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS mode_sessions (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      mode_id TEXT NOT NULL,
+      status TEXT NOT NULL,
+      engine TEXT NOT NULL DEFAULT '',
+      harness_root TEXT NOT NULL DEFAULT '',
+      harness_phase TEXT NOT NULL DEFAULT '',
+      session_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      ended_at TEXT
+    );
+
+    CREATE TABLE IF NOT EXISTS mode_session_assets (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL REFERENCES mode_sessions(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      asset_id TEXT NOT NULL,
+      asset_type TEXT NOT NULL,
+      load_state TEXT NOT NULL,
+      title TEXT NOT NULL,
+      manifest_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      activated_at TEXT,
+      UNIQUE(session_id, asset_id)
+    );
   `);
   ensureColumn(db, "projects", "gitlab_token", "TEXT NOT NULL DEFAULT ''");
   ensureColumn(db, "capsules", "conversation_key", "TEXT NOT NULL DEFAULT ''");
@@ -184,7 +213,9 @@ function migrate(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_skill_assets_project_status ON skill_assets(project_id, status, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_skill_assets_status ON skill_assets(status, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_asset_shares_artifact ON asset_shares(artifact_type, artifact_id);");
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '5')").run();
+  db.exec("CREATE INDEX IF NOT EXISTS idx_mode_sessions_project_status ON mode_sessions(project_id, status, updated_at DESC);");
+  db.exec("CREATE INDEX IF NOT EXISTS idx_mode_session_assets_session ON mode_session_assets(session_id, updated_at DESC);");
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '6')").run();
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -528,6 +559,40 @@ function rowToSkillAsset(row) {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     storage: skillAssetStorageRef(row.id)
+  };
+}
+
+function rowToModeAsset(row) {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    projectId: row.project_id,
+    assetId: row.asset_id,
+    assetType: row.asset_type,
+    loadState: row.load_state,
+    title: row.title,
+    manifest: parseJson(row.manifest_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    activatedAt: row.activated_at
+  };
+}
+
+function rowToModeSession(row, assets = []) {
+  const session = parseJson(row.session_json, null) || {};
+  return {
+    ...session,
+    id: row.id,
+    projectId: row.project_id,
+    modeId: row.mode_id,
+    status: row.status,
+    engine: row.engine,
+    harnessRoot: row.harness_root,
+    harnessPhase: row.harness_phase,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    endedAt: row.ended_at,
+    loadedAssets: assets
   };
 }
 
@@ -1198,6 +1263,150 @@ export function readShare(cwd = process.cwd(), token) {
   if (row) return parseJson(row.share_json, null);
   const assetRow = openDb().prepare("SELECT share_json FROM asset_shares WHERE token = ?").get(token);
   return assetRow ? parseJson(assetRow.share_json, null) : null;
+}
+
+export function saveModeSession(cwd = process.cwd(), session = {}) {
+  const project = ensureProject(cwd);
+  const now = nowIso();
+  const createdAt = session.createdAt || now;
+  const updatedAt = session.updatedAt || now;
+  const payload = {
+    ...session,
+    projectId: project.id,
+    createdAt,
+    updatedAt
+  };
+  openDb().prepare(`
+    INSERT INTO mode_sessions(
+      id, project_id, mode_id, status, engine, harness_root, harness_phase,
+      session_json, created_at, updated_at, ended_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET
+      status = excluded.status,
+      engine = excluded.engine,
+      harness_root = excluded.harness_root,
+      harness_phase = excluded.harness_phase,
+      session_json = excluded.session_json,
+      updated_at = excluded.updated_at,
+      ended_at = excluded.ended_at
+  `).run(
+    payload.id,
+    project.id,
+    payload.modeId,
+    payload.status || "active",
+    payload.engine || "",
+    payload.harnessRoot || "",
+    payload.harnessPhase || "",
+    jsonText(payload),
+    createdAt,
+    updatedAt,
+    payload.endedAt || null
+  );
+  openDb().prepare("UPDATE projects SET updated_at = ? WHERE id = ?").run(updatedAt, project.id);
+  return readModeSession(cwd, payload.id);
+}
+
+export function saveModeSessionAsset(cwd = process.cwd(), sessionId, asset = {}) {
+  const project = ensureProject(cwd);
+  const now = nowIso();
+  const createdAt = asset.createdAt || now;
+  const updatedAt = asset.updatedAt || now;
+  const id = asset.id || `${sessionId}:${asset.assetId}`;
+  openDb().prepare(`
+    INSERT INTO mode_session_assets(
+      id, session_id, project_id, asset_id, asset_type, load_state, title,
+      manifest_json, created_at, updated_at, activated_at
+    )
+    VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(session_id, asset_id) DO UPDATE SET
+      load_state = excluded.load_state,
+      title = excluded.title,
+      manifest_json = excluded.manifest_json,
+      updated_at = excluded.updated_at,
+      activated_at = COALESCE(excluded.activated_at, mode_session_assets.activated_at)
+  `).run(
+    id,
+    sessionId,
+    project.id,
+    asset.assetId,
+    asset.assetType || "skill",
+    asset.loadState || "reference",
+    asset.title || "",
+    jsonText(asset.manifest || {}),
+    createdAt,
+    updatedAt,
+    asset.activatedAt || null
+  );
+  openDb().prepare("UPDATE mode_sessions SET updated_at = ? WHERE id = ?").run(updatedAt, sessionId);
+  return readModeSessionAsset(sessionId, asset.assetId);
+}
+
+export function listModeSessionAssets(sessionId) {
+  if (!sessionId) return [];
+  return openDb().prepare(`
+    SELECT * FROM mode_session_assets
+    WHERE session_id = ?
+    ORDER BY updated_at DESC, title ASC
+  `).all(sessionId).map(rowToModeAsset);
+}
+
+export function readModeSessionAsset(sessionId, assetId) {
+  if (!sessionId || !assetId) return null;
+  const row = openDb().prepare(`
+    SELECT * FROM mode_session_assets
+    WHERE session_id = ? AND asset_id = ?
+    LIMIT 1
+  `).get(sessionId, assetId);
+  return row ? rowToModeAsset(row) : null;
+}
+
+export function readModeSession(cwd = process.cwd(), sessionId) {
+  if (!sessionId) return null;
+  ensureProject(cwd);
+  const row = openDb().prepare(`
+    SELECT * FROM mode_sessions
+    WHERE id = ?
+    LIMIT 1
+  `).get(sessionId);
+  return row ? rowToModeSession(row, listModeSessionAssets(row.id)) : null;
+}
+
+export function readCurrentModeSession(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  return readCurrentModeSessionForProject(project.id);
+}
+
+export function readCurrentModeSessionForProject(projectId) {
+  const row = openDb().prepare(`
+    SELECT * FROM mode_sessions
+    WHERE project_id = ? AND status = 'active'
+    ORDER BY updated_at DESC
+    LIMIT 1
+  `).get(projectId);
+  return row ? rowToModeSession(row, listModeSessionAssets(row.id)) : null;
+}
+
+export function endCurrentModeSession(cwd = process.cwd()) {
+  const current = readCurrentModeSession(cwd);
+  if (!current) return null;
+  const now = nowIso();
+  openDb().prepare(`
+    UPDATE mode_sessions
+    SET status = 'ended', updated_at = ?, ended_at = ?
+    WHERE id = ?
+  `).run(now, now, current.id);
+  return readModeSession(cwd, current.id);
+}
+
+export function endActiveModeSessions(cwd = process.cwd()) {
+  const project = ensureProject(cwd);
+  const now = nowIso();
+  openDb().prepare(`
+    UPDATE mode_sessions
+    SET status = 'ended', updated_at = ?, ended_at = ?
+    WHERE project_id = ? AND status = 'active'
+  `).run(now, now, project.id);
 }
 
 export function saveGitLabState(cwd, state) {

@@ -144,8 +144,8 @@ function knowledgeImportText(knowledge) {
   ].join("\n");
 }
 
-export function importAssetContext(cwd = process.cwd(), refOrShare) {
-  if (refOrShare?.skill) return importSkillAsset(cwd, refOrShare);
+export function importAssetContext(cwd = process.cwd(), refOrShare, options = {}) {
+  if (refOrShare?.skill) return importSkillAsset(cwd, refOrShare, options);
   if (refOrShare?.knowledge) return knowledgeImportText(refOrShare.knowledge);
   if (refOrShare?.capsule) return capsuleImportText(refOrShare.capsule);
 
@@ -153,7 +153,7 @@ export function importAssetContext(cwd = process.cwd(), refOrShare) {
   if (!asset) return null;
   if (asset.type === "capsule") return capsuleImportText(asset.payload);
   if (asset.type === "knowledge") return knowledgeImportText(asset.payload);
-  if (asset.type === "skill") return importSkillAsset(cwd, asset.payload);
+  if (asset.type === "skill") return importSkillAsset(cwd, asset.payload, options);
   if (asset.type === "session") return sessionImportText(asset);
   return null;
 }
@@ -245,7 +245,7 @@ function createCapsuleFromSession(session, options = {}) {
 }
 
 export function convertAsset(cwd = process.cwd(), ref, targetType, options = {}) {
-  const asset = readAsset(cwd, ref);
+  const asset = typeof ref === "string" ? readAsset(cwd, ref) : assetFromPayload(ref);
   if (!asset) throw new Error(`Asset not found: ${ref}`);
   const target = String(targetType || "").trim().toLowerCase();
 
