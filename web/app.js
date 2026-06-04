@@ -16,10 +16,6 @@ function el(tag, className, text) {
   return node;
 }
 
-function icon(className) {
-  return el("span", `glyph ${className}`);
-}
-
 function percent(value) {
   const n = Number(value);
   if (!Number.isFinite(n)) return 0;
@@ -100,14 +96,6 @@ function gitRequirementText(requirement) {
     `Latest scoped commit: ${repo.latestCommit?.sha ? `${repo.latestCommit.sha.slice(0, 12)} ${repo.latestCommit.subject || ""}`.trim() : "none"}`,
     `Unpushed scoped commits: ${repo.unpushedCommits?.length ? repo.unpushedCommits.map((commit) => `${commit.sha.slice(0, 12)} ${commit.subject || ""}`.trim()).join("; ") : "none"}`
   ].join("\n");
-}
-
-function metric({ label, value, tone, iconName }) {
-  const node = el("article", `metric ${tone}`);
-  const top = el("div", "metric-top");
-  top.append(icon(iconName), el("span", "", label));
-  node.append(top, el("strong", "", String(value)));
-  return node;
 }
 
 function progressBar(value) {
@@ -293,18 +281,6 @@ async function runSettingsAction(action) {
   } catch (error) {
     message.textContent = error instanceof Error ? error.message : String(error);
   }
-}
-
-function renderMetrics(totals, projects) {
-  const root = document.querySelector("#overview");
-  const assets = allAssets(projects);
-  const pendingReview = assets.filter((asset) => ["submitted", "draft"].includes(normalizeStatus(asset.status))).length;
-  root.replaceChildren(
-    metric({ label: "项目", value: totals.projects, tone: "blue", iconName: "project" }),
-    metric({ label: "资产", value: totals.assets || 0, tone: "green", iconName: "capsule" }),
-    metric({ label: "进行中", value: totals.activeCapsules, tone: "blue", iconName: "active" }),
-    metric({ label: "待审核", value: pendingReview, tone: "amber", iconName: "review" })
-  );
 }
 
 function renderAttention(projects) {
@@ -1001,7 +977,6 @@ async function loadDashboard() {
 
 function renderAll() {
   const projects = filteredProjects();
-  renderMetrics(state.dashboard.totals, projects);
   renderModeStatus(projects);
   renderSideRail(projects);
   renderAttention(projects);
