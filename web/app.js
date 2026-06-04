@@ -387,45 +387,12 @@ function formatUpdated(value) {
 function assetImportTitle(asset) {
   if (asset.type === "capsule") return "接续完整会话";
   if (asset.type === "knowledge") return "导入项目知识";
-  if (asset.type === "skill") return "引用 Skill Manifest";
+  if (asset.type === "skill") return "导入团队 Skill";
   if (asset.type === "session") return "导入活跃 Session";
   return "导入资产上下文";
 }
 
-function skillManifestFromAsset(asset) {
-  const payload = asset.payload || {};
-  return {
-    id: asset.id,
-    title: asset.title,
-    type: asset.assetType || payload.type || "skill",
-    status: asset.status,
-    description: compact(asset.summary || payload.summary || "", 220),
-    updatedAt: asset.updatedAt || payload.updatedAt || ""
-  };
-}
-
-function skillManifestText(asset) {
-  const manifest = skillManifestFromAsset(asset);
-  return [
-    `# Handoff Skill Manifest: ${manifest.title}`,
-    "",
-    `Asset: ${manifest.id}`,
-    `Type: ${manifest.type}`,
-    `Status: ${manifest.status}`,
-    `Load State: reference`,
-    "",
-    "当前只加载 Skill 描述，用于判断是否适合当前任务。",
-    "需要完整 Skill 内容时运行：",
-    "",
-    `handoff skill import "${manifest.id}" --activate`,
-    "",
-    "## Description",
-    "",
-    manifest.description || "暂无描述。"
-  ].join("\n");
-}
-
-function skillActivationText(asset) {
+function skillImportText(asset) {
   const payload = asset.payload || {};
   return [
     `# Handoff Skill Import: ${asset.title}`,
@@ -457,7 +424,7 @@ function assetImportText(asset) {
     ].join("\n");
   }
   if (asset.type === "skill") {
-    return skillManifestText(asset);
+    return skillImportText(asset);
   }
   if (asset.type === "session") {
     const messages = payload.recentMessages || [];
@@ -534,20 +501,6 @@ async function openAssetContext(asset) {
       title: assetImportTitle(fullAsset),
       text: assetImportText(fullAsset),
       files: assetFiles(fullAsset)
-    });
-  } catch (error) {
-    window.alert(error instanceof Error ? error.message : String(error));
-  }
-}
-
-async function openSkillActivation(asset) {
-  try {
-    const fullAsset = await loadAsset(asset);
-    openContextDialog({
-      kicker: "Skill",
-      title: "激活完整 Skill",
-      text: skillActivationText(fullAsset),
-      files: [fullAsset.id]
     });
   } catch (error) {
     window.alert(error instanceof Error ? error.message : String(error));
@@ -727,52 +680,89 @@ function deleteAssetButton(asset) {
   return button;
 }
 
-function assetActions(asset) {
-  const actions = el("div", "asset-actions");
-  const importButton = rowAction(asset.type === "skill" ? "引用" : "导入", "primary");
-  const shareButton = rowAction("分享");
-  importButton.addEventListener("click", () => openAssetContext(asset));
-  shareButton.addEventListener("click", async () => {
-    try {
-      const text = await shareAsset(asset);
-      openContextDialog({
-        kicker: "Share",
-        title: "分享资产",
-        text,
-        files: [asset.id]
-      });
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error));
-    }
+function closeAllMenus(except) {
+  document.querySelectorAll(".action-more.open").forEach((node) => {
+    if (node !== except) node.classList.remove("open");
   });
-  actions.append(importButton, shareButton, ...conversionButtons(asset));
-  if (asset.type === "session") {
-    actions.replaceChildren(importButton, ...conversionButtons(asset));
-    return actions;
+}
+
+function menuItem(label, handler, className = "") {
+  const item = el("button", className, label);
+  item.type = "button";
+  item.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    closeAllMenus();
+    handler(item);
+  });
+  return item;
+}
+
+async function shareAssetAction(asset) {
+  try {
+    const text = await shareAsset(asset);
+    openContextDialog({ kicker: "Share", title: "分享资产", text, files: [asset.id] });
+  } catch (error) {
+    window.alert(error instanceof Error ? error.message : String(error));
   }
-  if (asset.type === "skill") {
-    const activateButton = rowAction("激活");
-    activateButton.addEventListener("click", () => openSkillActivation(asset));
-    actions.append(activateButton);
+}
+
+function buildOverflowMenu(asset) {
+  const wrap = el("div", "action-more");
+  const trigger = el("button", "action-more-btn", "⋯");
+  trigger.type = "button";
+  trigger.setAttribute("aria-label", "更多操作");
+  trigger.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const willOpen = !wrap.classList.contains("open");
+    closeAllMenus(wrap);
+    wrap.classList.toggle("open", willOpen);
+  });
+
+  const menu = el("div", "action-menu");
+  menu.append(menuItem("分享", () => shareAssetAction(asset)));
+
+  // Conversions become menu rows.
+  for (const button of conversionButtons(asset)) {
+    const label = button.textContent;
+    menu.append(menuItem(label, () => button.click()));
   }
+
   if (asset.type === "capsule") {
-    const attachButton = rowAction("接续");
-    attachButton.addEventListener("click", async () => {
+    menu.append(menuItem("接续", async () => {
       try {
         const fullAsset = await loadAsset(asset);
         openAttachDialog(fullAsset.payload || {});
       } catch (error) {
         window.alert(error instanceof Error ? error.message : String(error));
       }
-    });
-    actions.append(attachButton);
+    }));
   }
+
   if (["capsule", "knowledge", "skill"].includes(asset.type)) {
-    actions.append(deleteAssetButton(asset));
+    menu.append(el("div", "menu-sep"));
+    const del = deleteAssetButton(asset);
+    del.classList.remove("row-action", "danger");
+    del.classList.add("danger");
+    menu.append(del);
   }
+
+  wrap.append(trigger, menu);
+  return wrap;
+}
+
+function assetActions(asset) {
+  const actions = el("div", "asset-actions");
+  const importButton = rowAction("导入", "primary");
+  importButton.addEventListener("click", () => openAssetContext(asset));
+  actions.append(importButton);
+
   if (asset.type === "skill" && !["approved", "published"].includes(asset.status)) {
-    actions.append(badge("submitted", "需审核"));
+    actions.append(el("span", "row-flag", "需审核"));
   }
+
+  actions.append(buildOverflowMenu(asset));
   return actions;
 }
 
@@ -788,13 +778,9 @@ function assetTags(asset) {
 
 function renderAssetCard(asset) {
   const row = el("article", `asset-row ${asset.type}-asset`);
-  const check = document.createElement("input");
-  check.type = "checkbox";
-  check.setAttribute("aria-label", `选择 ${asset.title}`);
   const main = el("div", "asset-main");
   main.append(el("strong", "", asset.title), el("p", "", compact(asset.summary || "暂无摘要", 120)));
   row.append(
-    check,
     main,
     assetTags(asset),
     badge(asset.status || "available"),
@@ -804,7 +790,7 @@ function renderAssetCard(asset) {
   );
   row.addEventListener("click", (event) => {
     if (event.target.closest("button")) return;
-    if (event.target.closest("input")) return;
+    if (event.target.closest("a")) return;
     openAssetContext(asset);
   });
   return row;
@@ -814,7 +800,6 @@ function renderAssetSection(group, assets) {
   const section = el("section", `asset-section ${group.type}-section`);
   const tableHeader = el("div", "asset-table-header");
   tableHeader.append(
-    el("span", "", ""),
     el("span", "", "名称与摘要"),
     el("span", "", "标签"),
     el("span", "", "审核状态"),
@@ -1025,6 +1010,12 @@ function renderAll() {
   applySideState();
 }
 
+document.addEventListener("click", (event) => {
+  if (!event.target.closest(".action-more")) closeAllMenus();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") closeAllMenus();
+});
 document.querySelector("#refresh").addEventListener("click", loadDashboard);
 document.querySelector("#settings").addEventListener("click", openSettingsDialog);
 document.querySelector("#side-toggle").addEventListener("click", () => {
