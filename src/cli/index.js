@@ -89,9 +89,9 @@ function usage() {
     "  handoff skill from-knowledge <knowledge-id> --json",
     "  handoff skill review <asset-id> --approve --reviewer <name>",
     "  handoff skill share <asset-id>",
-    "  handoff skill import <asset-id-or-token-or-url> [--activate]",
+    "  handoff skill import <asset-id-or-token-or-url>",
     "  handoff mode enter team-development",
-    "  handoff mode import <skill-id> [--activate]",
+    "  handoff mode import <skill-id> [--pin]",
     "  handoff mode status --json",
     "  handoff mode exit",
     "  handoff status --json",
@@ -297,9 +297,7 @@ async function commandImport(args) {
   const ref = args._[1];
   if (!ref) throw new Error("Asset id, token, or share API URL is required");
   const share = await loadSharePayload(process.cwd(), ref);
-  const text = importAssetContext(process.cwd(), share || ref, {
-    activate: Boolean(args.activate || args.full)
-  });
+  const text = importAssetContext(process.cwd(), share || ref);
   if (!text) throw new Error(`Asset not found: ${ref}`);
   if (args.json) return printJson(share || readAsset(process.cwd(), ref));
   process.stdout.write(`${text}\n`);
@@ -587,8 +585,8 @@ async function commandSkill(args) {
     if (!ref) throw new Error("Skill asset id, token, or share URL is required");
     const share = await loadSharePayload(process.cwd(), ref);
     const text = share?.skill
-      ? importSkillAsset(process.cwd(), share, { activate: Boolean(args.activate || args.full) })
-      : importSkillAsset(process.cwd(), ref, { activate: Boolean(args.activate || args.full) });
+      ? importSkillAsset(process.cwd(), share)
+      : importSkillAsset(process.cwd(), ref);
     if (!text) throw new Error(`Skill asset not found: ${ref}`);
     if (args.json) return printJson(share?.skill || readSkillAsset(process.cwd(), ref));
     process.stdout.write(`${text}\n`);
@@ -671,9 +669,7 @@ async function commandAsset(args) {
     const ref = args._[2];
     if (!ref) throw new Error("Asset id, token, or share URL is required");
     const share = await loadSharePayload(process.cwd(), ref);
-    const text = importAssetContext(process.cwd(), share || ref, {
-      activate: Boolean(args.activate || args.full)
-    });
+    const text = importAssetContext(process.cwd(), share || ref);
     if (!text) throw new Error(`Asset not found: ${ref}`);
     if (args.json) return printJson(share || readAsset(process.cwd(), ref));
     process.stdout.write(`${text}\n`);
@@ -717,7 +713,6 @@ async function commandMode(args) {
     const ref = args._[2];
     if (!ref) throw new Error("Skill asset id is required");
     const result = importModeSkill(process.cwd(), ref, {
-      activate: Boolean(args.activate || args.full),
       pin: Boolean(args.pin),
       force: Boolean(args.force)
     });

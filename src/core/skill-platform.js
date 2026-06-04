@@ -314,7 +314,10 @@ export function importSkillAsset(cwd = process.cwd(), refOrShare, options = {}) 
   const local = typeof refOrShare === "string" ? readSkillAsset(cwd, refOrShare) : null;
   const asset = local || refOrShare?.skill || refOrShare || null;
   if (!asset?.id) return null;
-  if (!options.activate && !options.full) return formatSkillManifestImport(asset);
+  // A user-initiated import always loads the full Skill body. Manifest-only
+  // (head/description) loading belongs solely to the mode auto-load path, which
+  // calls formatSkillManifestImport / skillAssetManifest directly.
+  if (options.manifestOnly) return formatSkillManifestImport(asset);
   return [
     `# Handoff Skill Import: ${asset.title}`,
     "",

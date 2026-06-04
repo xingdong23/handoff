@@ -11,7 +11,7 @@ import {
 } from "./store.js";
 import { importSkillAsset, skillAssetManifest } from "./skill-platform.js";
 
-const DEFAULT_HARNESS_ROOT = "/Users/chengzheng/workspace/chuangxin/harness";
+const DEFAULT_HARNESS_ROOT = "";
 
 const MODE_DEFINITIONS = {
   "team-development": {
@@ -180,18 +180,19 @@ export function importModeSkill(cwd = process.cwd(), ref, options = {}) {
   if (!["approved", "published"].includes(skill.status) && !options.force) {
     throw new Error(`Skill asset must be approved before mode import: ${skill.id}`);
   }
-  const loadState = options.pin ? "pinned" : options.activate ? "active" : "reference";
+  // A user-initiated import always loads the full Skill body. It becomes
+  // "active" by default; --pin promotes it to "pinned". (Manifest-only loading
+  // happens during enterMode auto-load, never on an explicit import.)
+  const loadState = options.pin ? "pinned" : "active";
   saveModeSessionAsset(cwd, current.id, {
     assetId: skill.id,
     assetType: "skill",
     loadState,
     title: skill.title,
     manifest: skillAssetManifest(skill),
-    activatedAt: options.activate || options.pin ? nowIso() : null
+    activatedAt: nowIso()
   });
-  const text = importSkillAsset(cwd, skill, {
-    activate: Boolean(options.activate || options.pin)
-  });
+  const text = importSkillAsset(cwd, skill);
   return {
     session: readCurrentModeSession(cwd),
     asset: skill,

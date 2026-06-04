@@ -153,25 +153,19 @@ handoff skill review "<asset-id>" --approve
 handoff skill share "<asset-id>"
 ```
 
-Reference a Skill Asset into the current AI chat by id, token, share page URL, or API URL. Skill import is lazy by default and returns a Manifest first:
+Import a Skill Asset into the current AI chat by id, token, share page URL, or API URL. An explicit import always loads the full Skill body:
 
 ```bash
 handoff skill import "<asset-id-or-token-or-url>"
 ```
 
-Load full Skill content only when the current task needs that Skill:
-
-```bash
-handoff skill import "<asset-id-or-token-or-url>" --activate
-```
-
-Enter a clean team development mode backed by Harness and approved Handoff Skill manifests:
+Enter a clean team development mode backed by Harness and approved Handoff Skill manifests. On entry, the approved team Skills are auto-loaded as Manifests (head/description only) so the model can decide which ones the task needs:
 
 ```bash
 handoff mode enter team-development
 ```
 
-Import a Skill into the active mode:
+Import a Skill into the active mode. This is an explicit import, so it loads the full Skill body and marks it active (use `--pin` to keep it for the whole session):
 
 ```bash
 handoff mode import "<skill-id>"

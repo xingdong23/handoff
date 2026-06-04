@@ -11,6 +11,6 @@ Run:
 handoff import "$ARGUMENTS"
 ```
 
-Use the returned Recovery Prompt, Knowledge context, or Skill Manifest as the active context for continuing the task.
+Use the returned Recovery Prompt, Knowledge context, or full Skill content as the active context for continuing the task.
 
-Skill imports are lazy by default. Use `handoff import "$ARGUMENTS" --activate` only when the full Skill content is needed.
+An explicit import always returns the full content. Manifest-only (head/description) loading happens only during team mode auto-load on `handoff mode enter`.

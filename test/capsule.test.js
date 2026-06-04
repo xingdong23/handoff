@@ -333,7 +333,6 @@ test("extracts a knowledge capsule and builds team memory", () => {
   assert.equal(listTeamMemorySnapshots({ limit: 1 })[0].id, memory.id);
 });
 
-
 test("keeps unrelated captures when only an ambient session is present", () => {
   const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
   process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
@@ -364,6 +363,7 @@ test("keeps unrelated captures when only an ambient session is present", () => {
     else process.env.CLAUDE_CODE_SESSION_ID = previousSession;
   }
 });
+
 test("analyzes a requirement document into a requirement capsule", () => {
   const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
   process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
@@ -434,9 +434,11 @@ test("publishes skill assets after review", () => {
   assert.equal(share.artifactType, "skill_asset");
   assert.equal(share.artifactId, fromKnowledge.id);
   assert.equal(readShare(cwd, share.token).skill.id, fromKnowledge.id);
-  assert.match(importSkillAsset(cwd, share), /Handoff Skill Manifest/);
-  assert.doesNotMatch(importSkillAsset(cwd, share), /## Content/);
-  assert.match(importSkillAsset(cwd, share, { activate: true }), /bounded exponential backoff/);
+  // An explicit import always loads the full Skill body.
+  assert.match(importSkillAsset(cwd, share), /Handoff Skill Import/);
+  assert.match(importSkillAsset(cwd, share), /bounded exponential backoff/);
+  // Manifest-only loading is reserved for the mode auto-load path.
+  assert.match(importSkillAsset(cwd, share, { manifestOnly: true }), /Handoff Skill Manifest/);
   assert.equal(getDashboard(cwd).totals.skillAssets, 3);
 });
 
@@ -489,8 +491,8 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   reviewSkillAsset(cwd, skillBundle.skill.id, { approve: true, reviewer: "asset curator" });
   const skillShare = createAssetShare(cwd, skillBundle.skill.id, { visibility: "team" });
   assert.equal(readShare(cwd, skillShare.token).skill.id, skillBundle.skill.id);
-  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Manifest/);
-  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token), { activate: true }), /Handoff Skill Import/);
+  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token)), /Handoff Skill Import/);
+  assert.match(importAssetContext(cwd, readShare(cwd, skillShare.token), { manifestOnly: true }), /Handoff Skill Manifest/);
   assert.equal(getDashboard(cwd).totals.assets, 7);
 
   const deletedSkill = deleteAsset(cwd, skillFromKnowledge.target.id);
@@ -506,7 +508,7 @@ test("manages capsules, knowledge, and skills through unified assets", () => {
   assert.equal(readAsset(cwd, skillBundle.capsule.id), null);
 });
 
-test("enters team development mode with approved skill manifests and activates skill on demand", () => {
+test("auto-loads approved skill manifests on mode enter and loads full body on explicit import", () => {
   const cwd = mkdtempSync(join(tmpdir(), "handoff-mode-"));
   process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
 
@@ -532,25 +534,27 @@ test("enters team development mode with approved skill manifests and activates s
   reviewSkillAsset(cwd, skill.id, { approve: true, reviewer: "curator" });
 
   const entered = enterMode(cwd, "team-development", {
-    harnessRoot: "/Users/chengzheng/workspace/chuangxin/harness"
+    harnessRoot: cwd
   });
   assert.equal(entered.session.modeId, "team-development");
   assert.equal(entered.session.engine, "harness");
+  // On enter, approved team skills are auto-loaded as Manifests only (head/description).
   assert.equal(entered.session.loadedAssets.length, 1);
   assert.equal(entered.session.loadedAssets[0].loadState, "reference");
   assert.match(entered.prompt, /Harness 阶段/);
   assert.match(entered.prompt, /Nacos 接入/);
 
-  const referenced = importModeSkill(cwd, skill.id);
-  assert.equal(referenced.loadState, "reference");
-  assert.match(referenced.text, /Handoff Skill Manifest/);
-  assert.doesNotMatch(referenced.text, /完整 Nacos 接入步骤/);
-
-  const activated = importModeSkill(cwd, skill.id, { activate: true });
-  assert.equal(activated.loadState, "active");
-  assert.match(activated.text, /Handoff Skill Import/);
-  assert.match(activated.text, /完整 Nacos 接入步骤/);
+  // An explicit mode import loads the full Skill body and marks it active.
+  const imported = importModeSkill(cwd, skill.id);
+  assert.equal(imported.loadState, "active");
+  assert.match(imported.text, /Handoff Skill Import/);
+  assert.match(imported.text, /完整 Nacos 接入步骤/);
   assert.equal(modeStatus(cwd).session.loadedAssets[0].loadState, "active");
+
+  // --pin promotes the import to pinned, still loading the full body.
+  const pinned = importModeSkill(cwd, skill.id, { pin: true });
+  assert.equal(pinned.loadState, "pinned");
+  assert.match(pinned.text, /完整 Nacos 接入步骤/);
   assert.equal(getDashboard(cwd).projects[0].modeSession.modeId, "team-development");
 });
 
