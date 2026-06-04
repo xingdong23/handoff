@@ -1,6 +1,6 @@
 {
   "name": "@handoff-dev/handoff",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "Open-source AI chat capsule, sharing, recovery, Git, and GitLab command center.",
   "type": "module",
   "homepage": "https://github.com/xingdong23/handoff",
