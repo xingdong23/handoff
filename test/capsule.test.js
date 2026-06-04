@@ -333,6 +333,37 @@ test("extracts a knowledge capsule and builds team memory", () => {
   assert.equal(listTeamMemorySnapshots({ limit: 1 })[0].id, memory.id);
 });
 
+
+test("keeps unrelated captures when only an ambient session is present", () => {
+  const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
+  process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");
+  // Simulate two unrelated manual captures issued from the same shell session
+  // (e.g. inside one Claude Code session). Neither passes an explicit session,
+  // so the ambient identity must not make the second delete the first.
+  const previousSession = process.env.CLAUDE_CODE_SESSION_ID;
+  process.env.CLAUDE_CODE_SESSION_ID = "ambient-shell-session";
+  try {
+    const first = createCapsule({ cwd, title: "first task", input: "summary: First unrelated task", source: "claude-code" }).capsule;
+    const second = createCapsule({ cwd, title: "second task", input: "summary: Second unrelated task", source: "claude-code" }).capsule;
+
+    assert.notEqual(first.id, second.id);
+    assert.equal(first.source.conversationAnchored, false);
+    assert.ok(readCapsule(cwd, first.id), "first capsule should survive the second capture");
+    assert.ok(readCapsule(cwd, second.id));
+    assert.equal(getDashboard(cwd).totals.capsules, 2);
+
+    // An explicitly anchored re-capture of the same conversation still replaces
+    // its peer (intentional same-conversation dedup).
+    const anchoredA = createCapsule({ cwd, title: "live chat v1", input: "summary: v1", source: "claude-code", sessionId: "chat-42" }).capsule;
+    const anchoredB = createCapsule({ cwd, title: "live chat v2", input: "summary: v2", source: "claude-code", sessionId: "chat-42" }).capsule;
+    assert.equal(anchoredA.source.conversationAnchored, true);
+    assert.equal(readCapsule(cwd, anchoredA.id), null, "anchored re-capture should replace its peer");
+    assert.ok(readCapsule(cwd, anchoredB.id));
+  } finally {
+    if (previousSession === undefined) delete process.env.CLAUDE_CODE_SESSION_ID;
+    else process.env.CLAUDE_CODE_SESSION_ID = previousSession;
+  }
+});
 test("analyzes a requirement document into a requirement capsule", () => {
   const cwd = mkdtempSync(join(tmpdir(), "handoff-"));
   process.env.HANDOFF_DB = join(cwd, "handoff.sqlite");

@@ -120,7 +120,7 @@ function migrate(db) {
     CREATE TABLE IF NOT EXISTS knowledge_capsules (
       id TEXT PRIMARY KEY,
       project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
-      capsule_id TEXT NOT NULL REFERENCES capsules(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      capsule_id TEXT NOT NULL,
       title TEXT NOT NULL,
       summary TEXT NOT NULL,
       topics_json TEXT NOT NULL,
@@ -215,7 +215,48 @@ function migrate(db) {
   db.exec("CREATE INDEX IF NOT EXISTS idx_asset_shares_artifact ON asset_shares(artifact_type, artifact_id);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_mode_sessions_project_status ON mode_sessions(project_id, status, updated_at DESC);");
   db.exec("CREATE INDEX IF NOT EXISTS idx_mode_session_assets_session ON mode_session_assets(session_id, updated_at DESC);");
-  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '6')").run();
+  dropKnowledgeCapsuleCascade(db);
+  db.prepare("INSERT OR REPLACE INTO meta(key, value) VALUES('schema_version', '7')").run();
+}
+
+// Knowledge capsules are a distilled, long-lived asset; they must survive the
+// deletion of the source capsule (a capsule can be removed as a "conversation
+// peer"). Older DBs declared capsule_id with ON DELETE CASCADE, which silently
+// dropped knowledge. Rebuild the table without that cascade when present.
+function dropKnowledgeCapsuleCascade(db) {
+  const hasCascade = db
+    .prepare("PRAGMA foreign_key_list(knowledge_capsules)")
+    .all()
+    .some((fk) => fk.table === "capsules" && fk.on_delete === "CASCADE");
+  if (!hasCascade) return;
+  db.exec("PRAGMA foreign_keys = OFF;");
+  db.exec(`
+    CREATE TABLE knowledge_capsules_new (
+      id TEXT PRIMARY KEY,
+      project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE ON UPDATE CASCADE,
+      capsule_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      topics_json TEXT NOT NULL,
+      facts_json TEXT NOT NULL,
+      decisions_json TEXT NOT NULL,
+      files_json TEXT NOT NULL,
+      commands_json TEXT NOT NULL,
+      knowledge_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      UNIQUE(project_id, capsule_id)
+    );
+    INSERT INTO knowledge_capsules_new SELECT
+      id, project_id, capsule_id, title, summary, topics_json,
+      facts_json, decisions_json, files_json, commands_json,
+      knowledge_json, created_at, updated_at
+    FROM knowledge_capsules;
+    DROP TABLE knowledge_capsules;
+    ALTER TABLE knowledge_capsules_new RENAME TO knowledge_capsules;
+    CREATE INDEX IF NOT EXISTS idx_knowledge_capsules_capsule ON knowledge_capsules(project_id, capsule_id);
+  `);
+  db.exec("PRAGMA foreign_keys = ON;");
 }
 
 function ensureColumn(db, table, column, definition) {
@@ -337,6 +378,10 @@ function skillAssetStorageRef(id) {
 
 function capsuleConversationKey(capsule) {
   const source = capsule?.source || {};
+  // Only an explicitly anchored conversation may replace its peers. An ambient
+  // session/chat picked up from the environment tags the source but does not
+  // anchor a conversation, so it yields no key (no destructive replacement).
+  if (source.conversationAnchored === false) return "";
   const app = slugify(source.app || "manual");
   const sessionId = String(source.sessionId || "").trim();
   if (sessionId) return `session:${app}:${sessionId}`;

@@ -223,14 +223,23 @@ export function createCapsule(options = {}) {
   const files = unique([...(context.files || []), ...(git.dirtyFiles || [])]);
   const summary = options.summary || context.summary || compact(input, 280) || "暂无摘要。";
   const sourceApp = options.source || context.sourceApp || firstEnv(["HANDOFF_SOURCE_APP", "CLAUDE_CODE_SOURCE_APP"]) || "manual";
-  const chatName = options.chatName || context.chatName || firstEnv(["HANDOFF_CHAT_NAME", "CLAUDE_CODE_CHAT_NAME", "CLAUDE_CHAT_NAME"]);
-  const sessionId = options.sessionId || context.sessionId || firstEnv([
+  // An explicit chat/session (CLI option or parsed from the capture body)
+  // deliberately identifies a conversation, so re-capturing it should replace
+  // the prior Capsule. An ambient value picked up from the environment only
+  // tags the source for display — it must NOT drive destructive replacement,
+  // or two unrelated captures from the same shell session would delete each
+  // other. We track that provenance via `conversationAnchored`.
+  const explicitChatName = options.chatName || context.chatName || "";
+  const explicitSessionId = options.sessionId || context.sessionId || "";
+  const chatName = explicitChatName || firstEnv(["HANDOFF_CHAT_NAME", "CLAUDE_CODE_CHAT_NAME", "CLAUDE_CHAT_NAME"]);
+  const sessionId = explicitSessionId || firstEnv([
     "HANDOFF_SESSION_ID",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_SESSION_ID",
     "CLAUDECODE_SESSION_ID",
     "CLAUDE_CONVERSATION_ID"
   ]);
+  const conversationAnchored = Boolean(explicitSessionId || explicitChatName);
 
   const capsule = {
     schemaVersion: 1,
@@ -244,7 +253,8 @@ export function createCapsule(options = {}) {
     source: {
       app: sourceApp,
       chatName,
-      sessionId
+      sessionId,
+      conversationAnchored
     },
     summary,
     progress: {
